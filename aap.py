@@ -132,6 +132,24 @@ st.markdown("""
 .z-badge{font-size:10px; padding:1px 7px; border-radius:12px; border:1px solid var(--line);}
 .z-has{color:var(--up); border-color:rgba(30,203,107,.4);}
 .z-zero{color:var(--muted);}
+/* compact board table */
+.board-table{width:100%; border-collapse:collapse; font-size:12px;}
+.board-table th{text-align:left; color:#8ba1c0; font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.4px; padding:5px 8px; border-bottom:1px solid var(--line);}
+.board-table td{padding:5px 8px; border-bottom:1px solid #18233a; color:#d9e5f6;
+  font-variant-numeric:tabular-nums;}
+.board-table tr:hover{background:#131d31;}
+.board-table td.sym{font-weight:700; color:#eaf1fb;}
+.board-table td.nm{color:#8ba1c0; font-size:10.5px;}
+.board-table .grp td{background:#0e1626; color:var(--accent2); font-size:10px;
+  font-weight:800; text-transform:uppercase; letter-spacing:1.2px;}
+.board-table .src{color:#5a6c8a; font-size:9px;}
+/* OI bias badge */
+.oi{font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid var(--line);
+  white-space:nowrap; font-weight:600;}
+.oi.plus{color:var(--up); border-color:rgba(30,203,107,.4);}
+.oi.minus{color:var(--down); border-color:rgba(255,75,92,.35);}
+.oi.none{color:var(--muted);}
 .stApp{background:var(--bg);}
 [data-testid="stSidebar"]{background:#0d1524;}
 [data-testid="stSidebar"] *{color:var(--txt);}
@@ -193,18 +211,19 @@ def load_scan(symbol, timeframe, min_score, strict, lookback, recommended):
 
 
 @st.cache_data(ttl=90, show_spinner=False)
-def load_universe(tf_tuple, min_score, recommended, strict):
+def load_universe(tf_tuple, min_score, recommended, strict, eod_filter):
     import zscan
     return zscan.scan_universe(timeframes=tf_tuple, min_score=min_score,
-                               recommended=recommended, strict=strict)
+                               recommended=recommended, strict=strict,
+                               eod_filter=eod_filter)
 
 
 @st.cache_data(ttl=90, show_spinner=False)
-def load_universe_zones(tf_tuple, min_score, recommended, strict, active_only):
+def load_universe_zones(tf_tuple, min_score, recommended, strict, active_only, eod_filter):
     import zscan
     return zscan.scan_universe_zones(timeframes=tf_tuple, min_score=min_score,
                                      recommended=recommended, strict=strict,
-                                     active_only=active_only)
+                                     active_only=active_only, eod_filter=eod_filter)
 
 
 # --------------------------------------------------------------------------- #
@@ -235,14 +254,25 @@ def _tile(q):
 def render_board():
     import marketdata as md
     data = load_market()
-    st.markdown('<div style="font-size:22px;font-weight:800;color:#eaf1fb;">🌍 '
-                'LIVE MARKET BOARD <span style="font-size:12px;color:#8ba1c0;'
+    st.markdown('<div style="font-size:20px;font-weight:800;color:#eaf1fb;">🌍 '
+                'LIVE MARKET BOARD <span style="font-size:11px;color:#8ba1c0;'
                 'font-weight:500;">auto-refresh · 45s</span></div>', unsafe_allow_html=True)
+    # Compact single-table board (mobile friendly; one row per instrument).
+    html = ['<table class="board-table"><thead><tr><th>Symbol</th><th>Name</th>'
+            '<th>Last</th><th>Chg%</th><th></th></tr></thead><tbody>']
     for grp, tiles in md.TILES:
-        st.markdown(f'<div class="grplabel">{GROUP_LABELS[grp]}</div>', unsafe_allow_html=True)
-        st.markdown('<div class="ticker-row">' + "".join(
-            _tile(data[t["label"]]) for t in tiles) + '</div>', unsafe_allow_html=True)
-    st.markdown('<div style="height:4px;"></div>', unsafe_allow_html=True)
+        html.append(f'<tr class="grp"><td colspan="5">{GROUP_LABELS[grp]}</td></tr>')
+        for t in tiles:
+            q = data[t["label"]]
+            px = f"{q['price']:,.2f}" if q["price"] is not None else "—"
+            chg = _chg_html(q["chg_pct"])
+            src = "TV" if q["src"] == "tv" else "Y"
+            html.append(
+                f'<tr><td class="sym">{t["label"]}</td>'
+                f'<td class="nm">{t["name"]}</td><td>{px}</td><td>{chg}</td>'
+                f'<td class="src">{src}</td></tr>')
+    html.append('</tbody></table>')
+    st.markdown("".join(html), unsafe_allow_html=True)
     return data
 
 
@@ -314,12 +344,12 @@ def render_fiidii():
                 f'</div>', unsafe_allow_html=True)
 
 
-def render_universe(tf_tuple, min_score, recommended, strict):
+def render_universe(tf_tuple, min_score, recommended, strict, eod_filter=False):
     st.markdown(f'<div class="phead"><span class="t">🚀 All NSE Futures Stocks '
                 f'<span style="color:#4f8cff;">({len(zdata.FUT_STOCKS)} symbols × '
                 f'{" + ".join(tf_tuple)})</span></span>'
                 f'<span class="s">live scan · 90s</span></div>', unsafe_allow_html=True)
-    rows = load_universe(tf_tuple, min_score, recommended, strict)
+    rows = load_universe(tf_tuple, min_score, recommended, strict, eod_filter)
     if not rows:
         st.caption("Nothing returned.")
         return
@@ -349,20 +379,34 @@ def render_universe(tf_tuple, min_score, recommended, strict):
                "net after Indian charges, ₹25k / 1% risk. Chain = live option chain for that stock.")
 
 
-def render_universe_zones(tf_tuple, min_score, recommended, strict):
+def _oi_badge(oi, is_demand):
+    """Render the Put/Call OI bias badge for a zone."""
+    if not oi:
+        return '<span class="oi none">—</span>'
+    aligned = (oi.startswith("P>") if is_demand else oi.startswith("C>"))
+    cls = "plus" if aligned else "minus"
+    return f'<span class="oi {cls}">{oi}</span>'
+
+
+def render_universe_zones(tf_tuple, min_score, recommended, strict, eod_filter):
     st.markdown(f'<div class="phead"><span class="t">🧭 Zone Scan — All NSE Futures '
                 f'Stocks <span style="color:#4f8cff;">({len(zdata.FUT_STOCKS)} × '
-                f'{" + ".join(tf_tuple)})</span></span>'
-                f'<span class="s">live · 90s</span></div>', unsafe_allow_html=True)
+                f'{" · ".join(tf_tuple)})</span></span>'
+                f'<span class="s">live scan · cached 90s</span></div>', unsafe_allow_html=True)
 
     # filters
-    f1, f2, f3 = st.columns([1, 1, 1])
+    f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
     state_opt = f1.selectbox("State", ["Active only", "All zones"], index=0)
     dir_opt = f2.selectbox("Direction", ["All", "Demand", "Supply"], index=0)
     sort_opt = f3.selectbox("Sort", ["Score ↓", "Distance", "Symbol"], index=0)
+    if eod_filter:
+        f4.markdown('<div style="font-size:10px;color:#8ba1c0;margin-top:6px;">📌 EOD band ON: '
+                    'scan only inside day-candle <b>low−10% … high+10%</b></div>',
+                    unsafe_allow_html=True)
 
     all_rows = load_universe_zones(tf_tuple, min_score, recommended, strict,
-                                   active_only=(state_opt == "Active only"))
+                                   active_only=(state_opt == "Active only"),
+                                   eod_filter=eod_filter)
     rows = all_rows
     if dir_opt != "All":
         rows = [r for r in rows if r["dir"] == dir_opt]
@@ -379,28 +423,35 @@ def render_universe_zones(tf_tuple, min_score, recommended, strict):
 
     hq = sum(1 for r in rows if r["hq"])
     active = sum(1 for r in rows if r["state"] in ("Fresh", "Tested"))
-    st.caption(f"{len(rows)} zones · {active} active (Fresh/Tested) · {hq} HQ (score≥90)")
+    biased = sum(1 for r in rows if r.get("oi"))
+    st.caption(f"{len(rows)} zones · {active} active (Fresh/Tested) · {hq} HQ (score≥90) · "
+               f"{biased} with live OI bias")
 
     html = ['<table class="univ-table"><thead><tr>'
-            '<th>Symbol</th><th>TF</th><th>Ptn</th><th>Dir</th><th>Score</th>'
-            '<th>Entry</th><th>SL</th><th>TP</th><th>State</th><th>Touch</th><th>Chain</th>'
-            '</tr></thead><tbody>']
+            '<th>Sym</th><th>TF</th><th>Ptn</th><th>Dir</th><th>Score</th>'
+            '<th>Entry</th><th>SL</th><th>TP</th><th>State</th><th>Touch</th>'
+            '<th>OI</th><th>Chart</th><th>Chain</th></tr></thead><tbody>']
     for r in rows:
         zbad = (f'<span class="z-badge z-has">{r["score"]}</span>' if r["score"] >= 50
                 else f'<span class="z-badge z-zero">{r["score"]}</span>')
         hq_star = " ⭐" if r["hq"] else ""
         state_cls = "" if r["state"] in ("Fresh", "Tested") else " style='color:#8ba1c0;'"
         chain = (f'<a href="{r["chain"]}" target="_blank">chain ↗</a>' if r.get("chain") else "")
+        tv = (f'<a href="{r["tv"]}" target="_blank" title="TradingView chart at {r["tf"]}">'
+              f'chart ↗</a>' if r.get("tv") else "")
         disp = r["symbol"].replace(".NS", "")
+        oi = _oi_badge(r.get("oi"), r["dir"] == "Demand")
         html.append(
             f'<tr><td class="sym">{disp}{hq_star}</td><td>{r["tf"]}</td>'
             f'<td>{r["pattern"]}</td><td>{r["dir"]}</td><td>{zbad}</td>'
             f'<td>{r["entry"]:,.2f}</td><td>{r["sl"]:,.2f}</td><td>{r["tp"]:,.2f}</td>'
-            f'<td{state_cls}>{r["state"]}</td><td>{r["touches"]}</td><td>{chain}</td></tr>')
+            f'<td{state_cls}>{r["state"]}</td><td>{r["touches"]}</td><td>{oi}</td>'
+            f'<td>{tv}</td><td>{chain}</td></tr>')
     html.append('</tbody></table>')
     st.markdown("".join(html), unsafe_allow_html=True)
-    st.caption("Entry = zone proximal, SL = distal+buffer, TP = recommended target (RR 1:3). "
-               "⭐ = HQ zone. Chain = live option chain for that stock.")
+    st.caption("OI = demand zones lean bullish when Put OI > Call OI (P>C); supply zones lean "
+               "bearish when Call OI > Put OI (C>P). Chart = TradingView chart at that TF. "
+               "Entry = zone proximal, SL = distal+buffer, TP = recommended target (RR 1:3). ⭐ = HQ.")
 
 
 def render_options(symbol):
@@ -447,14 +498,30 @@ import zdata  # for the universe symbol list
 symbol = st.sidebar.text_input("Symbol", value="RELIANCE.NS",
                                help="Any Yahoo symbol. Use ^NSEI for index, "
                                     "^NSEBANK for Bank Nifty.")
-timeframe = st.sidebar.selectbox("Timeframe", ["2h", "4h"], index=0)
+timeframe = st.sidebar.selectbox("Timeframe", zdata.TIMEFRAMES, index=zdata.TIMEFRAMES.index("2h"))
 min_score = st.sidebar.slider("Min density score", 20, 90, 40, step=5)
 lookback = st.sidebar.selectbox("Scan look-back", ["All", 24, 12, 6, 3])
 lookback_months = None if lookback == "All" else int(lookback)
 strict = st.sidebar.toggle("Spec-strict rules", value=False)
 recommended = st.sidebar.toggle("Recommended setup (DBD · mid · RR1:3)", value=True)
-scan_all = st.sidebar.toggle("Scan ALL NSE futures stocks (both TFs)", value=False,
-                             help="Scan the full F&O universe across 2h AND 4h in one table.")
+scan_all = st.sidebar.toggle("Scan ALL NSE futures stocks", value=False,
+                             help="Scan the full F&O universe across many timeframes "
+                                  "(15m → monthly) in one table.")
+univ_tfs = ["2h", "4h"]
+eod_filter = True
+if scan_all:
+    univ_tfs = st.sidebar.multiselect(
+        "Timeframes to scan (universe)",
+        zdata.TIMEFRAMES,
+        default=list(zdata.TIMEFRAMES),
+        help="Hold Ctrl/Cmd to add/remove. 15m-8h use intraday bars, 1D/1W/1M use daily bars. "
+             "All 11 timeframes scan in ~20s; results cached for 90s.")
+    if not univ_tfs:
+        univ_tfs = ["2h", "4h"]
+    eod_filter = st.sidebar.toggle(
+        "Scan only in day-candle band (low−10% … high+10%)", value=True,
+        help="Keep only zones whose price lies inside today's daily candle range "
+             "stretched by ±10%.")
 st.sidebar.markdown("---")
 st.sidebar.caption("Live data: Yahoo Finance + TradingView + niftytrader + NSE (keyless). "
                    "News & events: keyless RSS.")
@@ -508,9 +575,9 @@ with c1:
 with c2:
     st.markdown("## 🎯 Zone Screener")
     if scan_all:
-        # Full NSE futures universe zone scan across both timeframes
-        tf_tuple = ("2h", "4h")
-        render_universe_zones(tf_tuple, min_score, recommended, strict)
+        # Full NSE futures universe zone scan across multiple timeframes
+        tf_tuple = tuple(univ_tfs)
+        render_universe_zones(tf_tuple, min_score, recommended, strict, eod_filter)
         zones, df, extra = [], None, None
     else:
         try:
@@ -527,14 +594,18 @@ with c2:
         if last:
             head += f" · last {last:,.2f}"
         st.markdown(head)
-        # link the scanned stock to its live option chain
+        # link the scanned stock to its live option chain + TradingView chart
         try:
             import options as _o
+            import tv as _tv
             _links = _o.deep_links(symbol)
             _lc = "".join(f'<a class="chip" href="{l["url"]}" target="_blank" '
                           f'style="text-decoration:none;">↗ {l["label"]}</a>' for l in _links)
-            st.markdown(f'<div class="news-hint" style="margin-top:2px;">Options OI for this '
-                        f'stock:</div><div class="chips">{_lc}</div>', unsafe_allow_html=True)
+            _tvchip = (f'<a class="chip t" href="{_tv.chart_url(symbol, timeframe)}" '
+                       f'target="_blank" style="text-decoration:none;">📈 TradingView '
+                       f'chart</a>')
+            st.markdown(f'<div class="news-hint" style="margin-top:2px;">Options OI · chart:'
+                        f'</div><div class="chips">{_tvchip}{_lc}</div>', unsafe_allow_html=True)
         except Exception:
             pass
         if isinstance(extra, dict) and "roi" in extra:
@@ -549,10 +620,12 @@ with c2:
         active.sort(key=lambda z: (-z.densityScore, abs(z.proxVal - last) / z.proxVal))
         show = active[:8] if active else zones[:8]
         import pandas as pd
+        import zscan as _zs
         rows = [{"Dir": "D" if z.isDemand else "S", "Pat": z.patternType,
                  "Score": z.densityScore, "Entry": round(z.proxVal, 2),
                  "SL": round(z.slVal, 2), "TP": round(z.tpVal, 2),
-                 "State": z.state, "Touches": z.touchCount} for z in show]
+                 "State": z.state, "Touches": z.touchCount,
+                 "OI": (_zs.oi_bias(symbol, z.isDemand) or "—")} for z in show]
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
         if isinstance(extra, dict) and "win_1.0R_tested" in extra:
