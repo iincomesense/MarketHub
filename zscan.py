@@ -3,19 +3,67 @@ zscan.py — thin wrapper around zone_core for the Streamlit app.
 """
 from __future__ import annotations
 
+import threading
+
 import pandas as pd
 import zone_core
 import zdata
 
+# --------------------------------------------------------------------------- #
+#  small process-level caches so a universe scan reuses base bars / OI / quotes #
+# --------------------------------------------------------------------------- #
+_oi_cache = {}
+_oi_lock = threading.Lock()
+_daily_hl_cache = {}
+_dhl_lock = threading.Lock()
+
+
+def _daily_hl(symbol):
+    with _dhl_lock:
+        if symbol in _daily_hl_cache:
+            return _daily_hl_cache[symbol]
+    v = zdata.daily_hl(symbol, period="1y")
+    with _dhl_lock:
+        _daily_hl_cache[symbol] = v
+    return v
+
+
+def _oi_snapshot(symbol):
+    """Return (call_oi, put_oi) or (None, None).  Cached per symbol."""
+    with _oi_lock:
+        if symbol in _oi_cache:
+            return _oi_cache[symbol]
+    try:
+        import options as _opt
+        live = _opt.live_oi(symbol)
+        call_oi = live.get("call_oi")
+        put_oi = live.get("put_oi")
+    except Exception:
+        call_oi, put_oi = None, None
+    with _oi_lock:
+        _oi_cache[symbol] = (call_oi, put_oi)
+    return call_oi, put_oi
+
+
+def oi_bias(symbol, is_demand):
+    """Return a display string for the Pur/call OI bias of a zone direction.
+
+    Demand (support) is bullish-leaning when Put OI > Call OI.
+    Supply (resistance) is bearish-leaning when Call OI > Put OI.
+    Returns like 'P>C' (bullish demand), 'C>P' (bearish supply), 'P<C', 'C<P',
+    or '' when the live OI is unavailable (blocked on cloud IPs).
+    """
+    call_oi, put_oi = _oi_snapshot(symbol)
+    if call_oi is None or put_oi is None or call_oi == 0:
+        return ""
+    if is_demand:
+        return "P>C" if put_oi > call_oi else "P<C"
+    return "C>P" if call_oi > put_oi else "C<P"
+
 
 def scan(symbol, timeframe="2h", min_score=40, recommended=False,
          strict=False, lookback_months=None, start=None):
-    """Return (zones, df, summary_dict) for a symbol / timeframe.
-
-    - zones:       list of Zone objects (VALID only; scans already filter).
-    - df:          the zone-ready frame (for realistic_roi).
-    - summary:     computed forward-quality summary via zone_core.backtest_summary.
-    """
+    """Return (zones, df, summary_dict) for a symbol / timeframe."""
     df = zdata.load_zone_frame(symbol, timeframe, start=start)
     params = zone_core.settings()
     if strict:
@@ -29,7 +77,6 @@ def scan(symbol, timeframe="2h", min_score=40, recommended=False,
         rec = zone_core.recommended_trade_setup()
         zones_all = zones
         zones = [z for z in zones_all if z.patternType in rec["patterns"]]
-        # apply the recommended SL buffer / RR for the target/TP in the Zone objects
         for z in zones:
             pass
         roi = zone_core.realistic_roi(
@@ -43,27 +90,48 @@ def scan(symbol, timeframe="2h", min_score=40, recommended=False,
 
 
 def scan_universe_zones(timeframes=("2h", "4h"), min_score=40, recommended=True,
-                        strict=False, active_only=False):
-    """Scan ALL NSE futures stocks across EVERY timeframe and return ONE flat list
-    of every VALID zone with its details (the true 'zone scan' across the universe).
+                        strict=False, active_only=False, eod_filter=False):
+    """Scan the full NSE futures universe across EVERY given timeframe and return
+    one flat list of every VALID zone with its details.
 
     Each row: {symbol, tf, pattern, dir, entry, sl, tp, score, hq, state,
-               touches, dist_pct, last, chain}
+               touches, ts, last, chain, tv, oi, eod_lo, eod_hi, in_band,
+               eod_band}
+
+    ``eod_filter``  : keep only zones that fall inside the EOD candle band
+                      (daily low -10% .. daily high +10%).  This is the
+                      "scan only in the area around today's daily candle" rule.
     """
     import options as _opt
+    import tv as _tv
     all_zones = []
+    seen_symbols = {}
     for sym in zdata.FUT_STOCKS:
+        eod_lo = eod_hi = None
+        if eod_filter:
+            hi, lo = _daily_hl(sym)
+            if hi is not None and lo is not None:
+                eod_hi = hi * 1.10
+                eod_lo = lo * 0.90
         for tf in timeframes:
             try:
                 zones, df, extra = scan(sym, tf, min_score=min_score,
                                         recommended=recommended, strict=strict)
                 last = float(df["close"].iloc[-1]) if df is not None and len(df) else None
+                # option-chain + tradingview links (compute once per symbol/tf)
                 links = _opt.deep_links(sym)
                 chain = links[0]["url"] if links else ""
+                tv_url = _tv.chart_url(sym, tf)
                 for z in zones:
                     if active_only and z.state not in ("Fresh", "Tested"):
                         continue
                     if recommended and z.patternType not in ["DBD"]:
+                        continue
+                    z_lo, z_hi = min(z.proxVal, z.distVal), max(z.proxVal, z.distVal)
+                    in_band = True
+                    if eod_filter and eod_lo is not None:
+                        in_band = (z_hi >= eod_lo) and (z_lo <= eod_hi)
+                    if eod_filter and not in_band:
                         continue
                     all_zones.append({
                         "symbol": sym, "tf": tf,
@@ -79,11 +147,15 @@ def scan_universe_zones(timeframes=("2h", "4h"), min_score=40, recommended=True,
                         "last": last,
                         "ts": str(z.timestamp)[:16],
                         "chain": chain,
+                        "tv": tv_url,
+                        "oi": oi_bias(sym, z.isDemand),
+                        "eod_lo": eod_lo,
+                        "eod_hi": eod_hi,
+                        "in_band": in_band,
                     })
             except Exception:
                 continue
-    # sort by score descending
-    all_zones.sort(key=lambda z: (-z["score"], z["symbol"]))
+    all_zones.sort(key=lambda z: (-z["score"], z["symbol"], z["tf"]))
     return all_zones
 
 
@@ -122,17 +194,15 @@ def zone_to_row(z, price):
 
 
 def scan_universe(timeframes=("2h", "4h"), min_score=40, recommended=True,
-                  strict=False):
-    """Scan ALL NSE futures stocks across BOTH timeframes at once.
+                  strict=False, eod_filter=False):
+    """Scan ALL NSE futures stocks across BOTH timeframes at once (summary rows).
 
     Returns a list of rows (one per stock-timeframe) with zone count, best active
     zone, last price, and recommended ROI, so the app can show the whole universe
     in a single table (each row also links to that stock's option chain).
-
-    Each row: {symbol, tf, zones, active, best_score, best_dir, last,
-               roi_n, roi_pct, chain_url_frag}
     """
     import options as _opt
+    import tv as _tv
     rows = []
     for sym in zdata.FUT_STOCKS:
         for tf in timeframes:
@@ -143,7 +213,6 @@ def scan_universe(timeframes=("2h", "4h"), min_score=40, recommended=True,
                 active = [z for z in zones if z.state in ("Fresh", "Tested")]
                 best = max(active, key=lambda z: z.densityScore) if active else None
                 roi = extra.get("roi", {}) if isinstance(extra, dict) else {}
-                # a short label for the option-chain deep link (first one)
                 links = _opt.deep_links(sym)
                 chain = links[0]["url"] if links else ""
                 rows.append({
@@ -156,10 +225,12 @@ def scan_universe(timeframes=("2h", "4h"), min_score=40, recommended=True,
                     "roi_n": roi.get("n_trades"),
                     "roi_pct": roi.get("net_roi_pct"),
                     "chain": chain,
+                    "tv": _tv.chart_url(sym, tf),
                 })
             except Exception as e:
                 rows.append({"symbol": sym, "tf": tf, "zones": 0, "active": 0,
                              "best_score": None, "best_dir": None, "best_pat": None,
                              "last": None, "roi_n": None, "roi_pct": None,
-                             "chain": "", "error": str(e)[:60]})
+                             "chain": "", "tv": _tv.chart_url(sym, tf),
+                             "error": str(e)[:60]})
     return rows
