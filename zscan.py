@@ -61,6 +61,32 @@ def oi_bias(symbol, is_demand):
     return "C>P" if call_oi > put_oi else "C<P"
 
 
+def eod_band(symbol):
+    """Return the EOD (daily close candle) band dict:
+       {hi, lo, eod_hi=hi*1.10, eod_lo=lo*0.90} or None if daily data unavailable.
+    The zone scan is restricted to this band (daily high+10% .. low-10%)."""
+    hi, lo = _daily_hl(symbol)
+    if hi is None or lo is None:
+        return None
+    return {"hi": hi, "lo": lo, "eod_hi": hi * 1.10, "eod_lo": lo * 0.90}
+
+
+def eod_zone_filter(zones, symbol):
+    """Keep only zones that fall inside the EOD band (daily high+10% .. low-10%).
+
+    Returns (kept_zones, band).  If band is None, returns zones unchanged.
+    """
+    band = eod_band(symbol)
+    if band is None:
+        return zones, None
+    kept = []
+    for z in zones:
+        z_lo, z_hi = min(z.proxVal, z.distVal), max(z.proxVal, z.distVal)
+        if z_hi >= band["eod_lo"] and z_lo <= band["eod_hi"]:
+            kept.append(z)
+    return kept, band
+
+
 def scan(symbol, timeframe="2h", min_score=40, recommended=False,
          strict=False, lookback_months=None, start=None):
     """Return (zones, df, summary_dict) for a symbol / timeframe."""
@@ -90,7 +116,8 @@ def scan(symbol, timeframe="2h", min_score=40, recommended=False,
 
 
 def scan_universe_zones(timeframes=("2h", "4h"), min_score=40, recommended=True,
-                        strict=False, active_only=False, eod_filter=False):
+                        strict=False, active_only=False, eod_filter=False,
+                        symbols=None):
     """Scan the full NSE futures universe across EVERY given timeframe and return
     one flat list of every VALID zone with its details.
 
@@ -101,12 +128,13 @@ def scan_universe_zones(timeframes=("2h", "4h"), min_score=40, recommended=True,
     ``eod_filter``  : keep only zones that fall inside the EOD candle band
                       (daily low -10% .. daily high +10%).  This is the
                       "scan only in the area around today's daily candle" rule.
+    ``symbols``     : optional list of Yahoo symbols to scan (default = all F&O).
     """
     import options as _opt
     import tv as _tv
     all_zones = []
-    seen_symbols = {}
-    for sym in zdata.FUT_STOCKS:
+    universe = list(symbols) if symbols else list(zdata.FUT_STOCKS)
+    for sym in universe:
         eod_lo = eod_hi = None
         if eod_filter:
             hi, lo = _daily_hl(sym)
@@ -194,7 +222,7 @@ def zone_to_row(z, price):
 
 
 def scan_universe(timeframes=("2h", "4h"), min_score=40, recommended=True,
-                  strict=False, eod_filter=False):
+                  strict=False, eod_filter=False, symbols=None):
     """Scan ALL NSE futures stocks across BOTH timeframes at once (summary rows).
 
     Returns a list of rows (one per stock-timeframe) with zone count, best active
@@ -204,7 +232,8 @@ def scan_universe(timeframes=("2h", "4h"), min_score=40, recommended=True,
     import options as _opt
     import tv as _tv
     rows = []
-    for sym in zdata.FUT_STOCKS:
+    universe = list(symbols) if symbols else list(zdata.FUT_STOCKS)
+    for sym in universe:
         for tf in timeframes:
             try:
                 zones, df, extra = scan(sym, tf, min_score=min_score,
