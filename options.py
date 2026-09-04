@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import requests
+from urllib.parse import quote
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/121 Safari/537.36")
@@ -49,13 +50,15 @@ def deep_links(symbol: str):
     """Return a list of {label, url} browser links to view the option chain."""
     fno, is_idx = fno_symbol(symbol)
     links = []
+    _q = quote(fno)          # URL-safe symbol (handles M&M -> M%26M)
+    _ql = quote(fno.lower())
     if is_idx:
         # Index option chains live on the dedicated index page.
         links.append({"label": "NSE Option Chain",
                       "url": f"https://www.nseindia.com/option-chain"
-                             f"?symbol={fno}"})
+                             f"?symbol={_q}"})
         links.append({"label": "niftytrader (live)",
-                      "url": f"https://www.niftytrader.in/nse-option-chain/{fno.lower()}"})
+                      "url": f"https://www.niftytrader.in/nse-option-chain/{_ql}"})
         links.append({"label": "Kotak Neo",
                       "url": "https://www.kotakneo.com/futures-and-options/"
                              "index-options/nifty-50-option-chain/"})
@@ -66,11 +69,11 @@ def deep_links(symbol: str):
         # Equity option chains -> use the NSE equity page and aggregators.
         links.append({"label": "NSE Equity OC",
                       "url": f"https://www.nseindia.com/option-chain"
-                             f"?symbol={fno}"})
+                             f"?symbol={_q}"})
         links.append({"label": "niftytrader (live)",
-                      "url": f"https://www.niftytrader.in/equity-option-chain/{fno.lower()}"})
+                      "url": f"https://www.niftytrader.in/equity-option-chain/{_ql}"})
         links.append({"label": "Sensibull",
-                      "url": f"https://web.sensibull.com/option-chain?underlying={fno}"})
+                      "url": f"https://web.sensibull.com/option-chain?underlying={_q}"})
     return links
 
 
