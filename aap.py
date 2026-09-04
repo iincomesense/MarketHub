@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-MarketHub (हिंदी) — Zone Screener + Live Market Terminal
-=========================================================
-एक ही पेज पर:
-  • ऊपर   : Live Market Board (छोटा) + Live Sector Indices (छोटा)
-  • मध्य   : FII/DII (आज) + Options OI (छोटा)
-  • मुख्य  : Demand/Supply Zone Scanner — हिंदी टेबल (TradingView + OI लिंक सहित)
-  • नीचे   : महत्वपूर्ण समाचार + इवेंट (हिंदी हेडलाइन, touch = open)
+MarketHub — Demand & Supply Zone Scanner (Universe · multi-timeframe)
+====================================================================
+One page:
+  • TOP   : Zone Scanner — all NSE stocks × multi-timeframe (English table,
+            each row links to TradingView chart + live option chain/OI)
+  • MID   : Live Market Board + Global Indices + Live Sector Indices (compact tables)
+  • FII/DII (today) + Options OI
+  • BOTTOM: News + Events (headlines in हिंदी, tap = open original)
 
-Deploy:  streamlit run app.py   (Streamlit Cloud पर भी — सभी .py root में)
-Data:    Yahoo Finance / TradingView / NSE / niftytrader / RSS (सब keyless)
+Deploy:  streamlit run app.py   (all .py in the repo root)
+Data:    Yahoo Finance / TradingView / NSE / niftytrader / RSS  (all keyless)
 """
 from __future__ import annotations
 
@@ -19,13 +20,12 @@ import datetime
 import requests
 import streamlit as st
 
-# ── ensure sibling modules importable regardless of launch dir ─────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-st.set_page_config(page_title="MarketHub · Zone Screener (हिंदी)", page_icon="📊",
-                   layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="MarketHub · Zone Scanner", page_icon="📊",
+                   layout="wide", initial_sidebar_state="collapsed")
 
 # ── Inline theme ────────────────────────────────────────────────────────────
 st.markdown("""
@@ -42,23 +42,25 @@ st.markdown("""
 [data-testid="stExpander"]{background-color:#121a2b;}
 [data-testid="stExpander"] *{color:#e6edf7;}
 
-/* compact board chips */
-.strip{display:flex; gap:8px; flex-wrap:wrap; margin:2px 0 6px;}
-.bchip{flex:0 1 auto; min-width:104px; background:linear-gradient(160deg,#141d31,#0e1626);
-  border:1px solid var(--line); border-radius:10px; padding:7px 9px; font-size:12px;}
-.bchip .sym{font-weight:700; color:#eaf1fb; font-size:12px;}
-.bchip .px{font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;}
-.bchip .chg{font-size:10.5px; font-weight:600;}
-.grplabel{font-size:10px; text-transform:uppercase; letter-spacing:1.2px;
-  color:var(--accent2); font-weight:700; margin:7px 2px 3px;}
-.up{color:var(--up);} .dn{color:var(--down);} .flat{color:var(--muted);}
-.panel{background:#101828; border:1px solid var(--line); border-radius:14px;
-  padding:10px 12px; margin-bottom:10px;}
-.phead{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap;}
-.phead .t{font-size:16px; font-weight:800; color:#eaf1fb;}
-.phead .s{font-size:10.5px; color:var(--muted);}
+/* compact board table */
+.board-table{width:100%; border-collapse:collapse; font-size:12px;}
+.board-table th{text-align:left; color:var(--muted); font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.4px; padding:5px 8px; border-bottom:1px solid var(--line);}
+.board-table td{padding:5px 8px; border-bottom:1px solid #18233a; color:#d9e5f6;
+  font-variant-numeric:tabular-nums;}
+.board-table tr:hover{background:#131d31;}
+.board-table td.sym{font-weight:700; color:#eaf1fb;}
+.board-table td.nm{color:#8ba1c0; font-size:10.5px;}
+.board-table .grp td{background:#0e1626; color:var(--accent2); font-size:10px;
+  font-weight:800; text-transform:uppercase; letter-spacing:1.2px;}
+.board-table .src{color:#5a6c8a; font-size:9px;}
 
-/* summary bar (अंतिम स्कैन ...) */
+.phead{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap;}
+.phead .t{font-size:15px; font-weight:800; color:#eaf1fb;}
+.phead .s{font-size:10.5px; color:var(--muted);}
+.up{color:var(--up);} .dn{color:var(--down);} .flat{color:var(--muted);}
+
+/* summary bar */
 .sumbar{display:flex; gap:8px; flex-wrap:wrap; background:#0e1626;
   border:1px solid var(--line); border-radius:12px; padding:8px 12px;
   margin:8px 0; font-size:12.5px;}
@@ -67,17 +69,15 @@ st.markdown("""
 .sumbar .sep{color:var(--muted);}
 .sumbar .lbl{color:var(--muted); font-size:10.5px;}
 
-/* Hindi zone table — horizontally scrollable, screenshot style */
-.zwrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px;
-  background:#0e1626;}
-.zhin{width:100%; border-collapse:collapse; font-size:12px; min-width:980px;}
+/* Hindi zone table — horizontally scrollable */
+.zwrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:#0e1626;}
+.zhin{width:100%; border-collapse:collapse; font-size:12px; min-width:1080px;}
 .zhin th{text-align:left; color:var(--muted); font-size:10.5px; text-transform:uppercase;
   letter-spacing:.4px; padding:7px 8px; border-bottom:1px solid var(--line);
   background:#0c1422; white-space:nowrap;}
 .zhin td{padding:6px 8px; border-bottom:1px solid #18233a; color:#d9e5f6;
   font-variant-numeric:tabular-nums; white-space:nowrap;}
 .zhin tr:hover{background:#131d31;}
-.zhin .sym{font-weight:700; color:#eaf1fb;}
 .zhin a{color:var(--accent2); text-decoration:none; font-weight:600;}
 .zhin a.sym{color:#eaf1fb; font-weight:700;}
 .zhin a.sym:hover{color:var(--accent2); text-decoration:underline;}
@@ -95,8 +95,8 @@ st.markdown("""
 .oi.plus{color:var(--up); border-color:rgba(30,203,107,.4);}
 .oi.minus{color:var(--down); border-color:rgba(255,75,92,.35);}
 .oi.none{color:var(--muted);}
-.fdbx{background:#0e1626; border:1px solid var(--line); border-radius:10px;
-  padding:8px 10px; margin-bottom:6px;}
+
+.fdbx{background:#0e1626; border:1px solid var(--line); border-radius:10px; padding:8px 10px;}
 .fdbx .lab{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px;}
 .fdbx .val{font-size:19px; font-weight:800; font-variant-numeric:tabular-nums;}
 .fdbx .sub{font-size:10px; color:var(--muted);}
@@ -107,7 +107,7 @@ st.markdown("""
 .news-time{color:var(--muted); font-size:11px; width:44px; flex:0 0 44px;}
 .news-body{flex:1; min-width:0;}
 .news-title{color:#dbeeef; font-size:13px; font-weight:600; text-decoration:none;}
-.news-body a{color:#dbeeef; text-decoration:none; word-break:break-word;}
+.news-body a{text-decoration:none; word-break:break-word;}
 .news-src{color:var(--muted); font-size:10px;}
 .chip{font-size:11px; background:#152036; border:1px solid var(--line);
   color:#cfe0ff; border-radius:20px; padding:2px 9px; display:inline-block;}
@@ -117,10 +117,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Hindi translation (best-effort Google, keyless) ─────────────────────────
+# ── Hindi translation for NEWS only (best-effort, keyless) ─────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
 def _hi(text):
-    """Translate English text to Hindi (best-effort; falls back to original)."""
     if not text or not str(text).strip():
         return str(text)
     try:
@@ -137,27 +136,10 @@ def _hi(text):
     return str(text)
 
 
-def _cat_hi(cat):
-    return {"Reversal": "उलटाव (Reversal)", "Continuation": "जारी (Continuation)"}.get(cat, cat)
+# ── timeframes / labels ─────────────────────────────────────────────────────
+LIVE_TFS = ["15m", "30m", "1h", "2h", "4h"]      # change within trading hours
+STABLE_TFS = ["6h", "8h", "1D", "1W", "1M"]      # slow — not re-scanned repeatedly
 
-
-def _dir_hi(d):
-    return {"Demand": "DEMAND", "Supply": "SUPPLY"}.get(d, d)
-
-
-def _state_hi(s):
-    return {"Fresh": "ताज़ा", "Tested": "परीक्षित", "Broken": "टूटा"}.get(s, s)
-
-
-def _score_cls(sc):
-    if sc >= 90:
-        return "hi"
-    if sc >= 60:
-        return "md"
-    return "lo"
-
-
-# Timeframe label -> as shown in the screenshot ("4 Hours", "1 Hour", "15 Min").
 TF_LABEL = {
     "15m": "15 Min", "30m": "30 Min", "75m": "75 Min", "1h": "1 Hour",
     "2h": "2 Hours", "4h": "4 Hours", "6h": "6 Hours", "8h": "8 Hours",
@@ -167,6 +149,10 @@ TF_LABEL = {
 
 def _tf_hi(tf):
     return TF_LABEL.get(str(tf), str(tf))
+
+
+def _score_cls(sc):
+    return "hi" if sc >= 90 else ("md" if sc >= 60 else "lo")
 
 
 # ── Cached data helpers ─────────────────────────────────────────────────────
@@ -185,7 +171,7 @@ def load_sectors():
 @st.cache_data(ttl=300, show_spinner=False)
 def load_news():
     import news as n
-    return n.fetch_latest(26)
+    return n.fetch_latest(20)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -197,7 +183,7 @@ def load_news_body(url):
 @st.cache_data(ttl=300, show_spinner=False)
 def load_events():
     import events as e
-    return e.fetch_events(24)
+    return e.fetch_events(16)
 
 
 @st.cache_data(ttl=90, show_spinner=False)
@@ -219,15 +205,32 @@ def load_scan(symbol, timeframe, min_score, strict, lookback, recommended):
                       lookback_months=lookback, recommended=recommended)
 
 
-@st.cache_data(ttl=90, show_spinner=False)
-def load_universe_zones(tf_tuple, min_score, recommended, strict, active_only,
-                        eod_filter, symbols_tuple):
+# universe scan split into LIVE (short TTL → auto-refresh) and STABLE (day-keyed)
+def _day_key():
+    """Return today's session key (YYYY-MM-DD).  Stable (>=1D) timeframes only change
+    when the day changes, so we key their cache on this: a new day forces one fresh
+    scan; within the day it stays cached (scanned once)."""
+    return datetime.datetime.now().strftime("%Y-%m-%d")
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_universe_live(tf_tuple, min_score, recommended, strict, eod_filter, symbols_tuple):
     import zscan
-    syms = list(symbols_tuple) if symbols_tuple else None
     return zscan.scan_universe_zones(timeframes=tf_tuple, min_score=min_score,
                                      recommended=recommended, strict=strict,
-                                     active_only=active_only, eod_filter=eod_filter,
-                                     symbols=syms)
+                                     active_only=False, eod_filter=eod_filter,
+                                     symbols=list(symbols_tuple) if symbols_tuple else None)
+
+
+# Stable TFs (1D/1W/1M, and 6h/8h) change only once a day -> cached for the whole
+# day; a new day (day_key) retriggers exactly one fresh scan.
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_universe_stable(tf_tuple, min_score, recommended, strict, eod_filter, symbols_tuple, day_key):
+    import zscan
+    return zscan.scan_universe_zones(timeframes=tf_tuple, min_score=min_score,
+                                     recommended=recommended, strict=strict,
+                                     active_only=False, eod_filter=eod_filter,
+                                     symbols=list(symbols_tuple) if symbols_tuple else None)
 
 
 def fmt_cr(x):
@@ -240,16 +243,15 @@ def fmt_cr(x):
 
 def _chg_html(c):
     if c is None:
-        return '<span class="chg flat">—</span>'
+        return '<span class="flat">—</span>'
     cls = "up" if c > 0 else ("dn" if c < 0 else "flat")
     sign = "+" if c > 0 else ("−" if c < 0 else "")
     return f'<span class="{cls}">{sign}{c:.2f}%</span>'
 
 
-# ── Compact Live Market Board ──────────────────────────────────────────────
-GRP_HI = {"dollar": "💵 मुद्राएँ", "rates": "🏛️ दरें और बॉन्ड",
-          "commodities": "🥇 धातु और ऊर्जा", "indices": "📈 ग्लोबल इंडेक्स",
-          "other": "अन्य"}
+# ── Compact English market board + sector indices (tables) ──────────────────
+GRP_EN = {"dollar": "💵 Currencies", "rates": "🏛️ Rates & Bonds",
+          "commodities": "🥇 Metals & Energy", "indices": "📈 Global Indices"}
 
 
 def render_board():
@@ -257,20 +259,22 @@ def render_board():
     data = load_market()
     st.markdown('<div class="phead"><span class="t">🌍 Live Market Board '
                 '<span style="color:#1ecb6b;font-size:11px;">● LIVE</span></span>'
-                '<span class="s">30s auto-refresh · छोटा</span></div>', unsafe_allow_html=True)
-    chips = []
+                '<span class="s">auto-refresh 30s</span></div>', unsafe_allow_html=True)
+    html = ['<table class="board-table"><thead><tr><th>Symbol</th><th>Name</th>'
+            '<th>Last</th><th>Chg%</th><th></th></tr></thead><tbody>']
     for grp, tiles in md.TILES:
-        chips.append(f'<span class="grplabel">{GRP_HI.get(grp, grp)}</span>')
+        html.append(f'<tr class="grp"><td colspan="5">{GRP_EN.get(grp, grp)}</td></tr>')
         for t in tiles:
             q = data[t["label"]]
             px = f"{q['price']:,.2f}" if q["price"] is not None else "—"
-            chips.append(
-                f'<div class="bchip"><div class="sym">{t["label"]}</div>'
-                f'<div class="px">{px}</div><div class="chg">{_chg_html(q["chg_pct"])}</div></div>')
-    st.markdown('<div class="strip">' + "".join(chips) + '</div>', unsafe_allow_html=True)
+            src = "TV" if q["src"] == "tv" else "Y"
+            html.append(f'<tr><td class="sym">{t["label"]}</td>'
+                        f'<td class="nm">{t["name"]}</td><td>{px}</td>'
+                        f'<td>{_chg_html(q["chg_pct"])}</td><td class="src">{src}</td></tr>')
+    html.append('</tbody></table>')
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
-# ── Compact Live Sector Indices ────────────────────────────────────────────
 def render_sectors():
     sec = load_sectors()
     if not sec:
@@ -278,51 +282,48 @@ def render_sectors():
     st.markdown('<div class="phead"><span class="t">🧱 Live Sector Indices '
                 '<span style="color:#1ecb6b;font-size:11px;">● LIVE</span></span>'
                 '<span class="s">NSE · 30s</span></div>', unsafe_allow_html=True)
-    chips = []
+    html = ['<table class="board-table"><thead><tr><th>Index</th><th>Last</th>'
+            '<th>Chg%</th><th>Src</th></tr></thead><tbody>']
     for s in sec:
         cls = "up" if s["chg_pct"] >= 0 else "dn"
-        px = f"{s['price']:,.1f}"
         sign = "+" if s["chg_pct"] >= 0 else "−"
-        chips.append(
-            f'<div class="bchip"><div class="sym">{s["label"]}</div>'
-            f'<div class="px">{px}</div><div class="chg {cls}">{sign}{s["chg_pct"]:.2f}%</div></div>')
-    st.markdown('<div class="strip">' + "".join(chips) + '</div>', unsafe_allow_html=True)
+        html.append(f'<tr><td class="sym">{s["label"]}</td>'
+                    f'<td>{s["price"]:,.1f}</td>'
+                    f'<td class="{cls}">{sign}{s["chg_pct"]:.2f}%</td>'
+                    f'<td class="src">{s["src"]}</td></tr>')
+    html.append('</tbody></table>')
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
-# ── FII/DII (आज + and-dino ke liye expander) ───────────────────────────────
+# ── FII/DII (today + expandable history) ────────────────────────────────────
 def render_fiidii():
-    st.markdown('<div class="phead"><span class="t">🏛️ FII / DII आज</span>'
+    st.markdown('<div class="phead"><span class="t">🏛️ FII / DII (Today)</span>'
                 '<span class="s">live · 90s</span></div>', unsafe_allow_html=True)
     try:
         days, monthly = load_fiidii()
     except Exception:
         days, monthly = [], {}
     if not days:
-        st.caption("आज का FII/DII अभी उपलब्ध नहीं।")
+        st.caption("FII/DII data not reachable right now.")
         return
     today = days[0]
-    fii = today.get("fii_net")
-    dii = today.get("dii_net")
+    fii, dii = today.get("fii_net"), today.get("dii_net")
     d = today.get("date", "")
-    try:
-        dome = d.strftime("%d-%b") if hasattr(d, "strftime") else str(d)
-    except Exception:
-        dome = str(d)
+    dome = d.strftime("%d-%b") if hasattr(d, "strftime") else str(d)
     st.markdown(
         f'<div class="fdrow">'
-        f'<div class="fdbx"><div class="lab">FII / FPI &nbsp;{dome}</div>'
+        f'<div class="fdbx"><div class="lab">FII / FPI {dome}</div>'
         f'<div class="val">{fmt_cr(fii)}</div>'
-        f'<div class="sub">खरीद {today.get("fii_buy","—")} · बिक्री {today.get("fii_sell","—")} Cr</div></div>'
-        f'<div class="fdbx"><div class="lab">DII &nbsp;{dome}</div>'
+        f'<div class="sub">Buy {today.get("fii_buy","—")} · Sell {today.get("fii_sell","—")} Cr</div></div>'
+        f'<div class="fdbx"><div class="lab">DII {dome}</div>'
         f'<div class="val">{fmt_cr(dii)}</div>'
-        f'<div class="sub">खरीद {today.get("dii_buy","—")} · बिक्री {today.get("dii_sell","—")} Cr</div></div>'
+        f'<div class="sub">Buy {today.get("dii_buy","—")} · Sell {today.get("dii_sell","—")} Cr</div></div>'
         f'<div class="fdbx"><div class="lab">NIFTY 50</div>'
         f'<div class="val">{today.get("nifty","—")}</div>'
         f'<div class="sub">chg {fmt_cr(today.get("chg",""))} pts</div></div>'
         f'</div>', unsafe_allow_html=True)
-    # और दिन — touch = expand
     if len(days) > 1:
-        with st.expander(f"📅 पिछले {min(len(days)-1, 5)} दिन देखें (touch = expand)"):
+        with st.expander(f"📅 Previous {min(len(days)-1, 5)} days (tap to expand)"):
             for rec in days[1:6]:
                 st.markdown(
                     f'<div class="fdbx"><div class="lab">{rec.get("date","")}</div>'
@@ -331,7 +332,7 @@ def render_fiidii():
                     unsafe_allow_html=True)
 
 
-# ── Options OI (छोटा) ──────────────────────────────────────────────────────
+# ── Options OI (compact) ────────────────────────────────────────────────────
 def _oi_badge(oi, is_demand):
     if not oi:
         return '<span class="oi none">—</span>'
@@ -339,8 +340,7 @@ def _oi_badge(oi, is_demand):
         cls = "plus" if oi.get("aligned") else "minus"
         return f'<span class="oi {cls}" title="Put OI vs Call OI">{oi["label"]}</span>'
     aligned = (oi.startswith("P>") if is_demand else oi.startswith("C>"))
-    cls = "plus" if aligned else "minus"
-    return f'<span class="oi {cls}">{oi}</span>'
+    return f'<span class="oi {"plus" if aligned else "minus"}">{oi}</span>'
 
 
 def render_options(symbol):
@@ -358,23 +358,22 @@ def render_options(symbol):
             f'<div class="val">{live["pcr"]:.2f}</div></div>'
             f'</div>', unsafe_allow_html=True)
     else:
-        st.caption("Live OI cloud पर सीमित है — नीचे लिंक से browser में देखें।")
-    links_html = "".join(
-        f'<a class="chip" href="{l["url"]}" target="_blank" '
-        f'style="text-decoration:none;">↗ {l["label"]}</a>' for l in links)
-    st.markdown(f'<div class="chips">{links_html}</div>', unsafe_allow_html=True)
+        st.caption("Live OI blocked on cloud IP — open the chain link in your browser.")
+    li = "".join(f'<a class="chip" href="{l["url"]}" target="_blank" '
+                 f'style="text-decoration:none;">↗ {l["label"]}</a>' for l in links)
+    st.markdown(f'<div class="chips">{li}</div>', unsafe_allow_html=True)
 
 
-# ── स्टॉक / यूनिवर्स हिंदी table ──────────────────────────────────────────
-def zone_table_heading(rows, lookback_hi="सभी"):
+# ── Zone table (English headers, screenshot-style) ──────────────────────────
+def zone_table_heading(rows, lookback_hi="All"):
     fresh = sum(1 for r in rows if r["state"] == "Fresh")
     tested = sum(1 for r in rows if r["state"] == "Tested")
     hq = sum(1 for r in rows if r["hq"])
     now = datetime.datetime.now().strftime("%H:%M:%S")
     return (f'<div class="sumbar">'
-            f'<span class="it"><span class="lbl">अंतिम स्कैन</span> {now}</span>'
+            f'<span class="it"><span class="lbl">Last scan</span> {now}</span>'
             f'<span class="sep">|</span>'
-            f'<span class="it"><b>{len(rows)}</b> <span class="lbl">कुल Zones</span></span>'
+            f'<span class="it"><b>{len(rows)}</b> <span class="lbl">Zones</span></span>'
             f'<span class="sep">|</span>'
             f'<span class="it"><b>{fresh}</b> <span class="lbl">Fresh</span></span>'
             f'<span class="sep">|</span>'
@@ -386,138 +385,129 @@ def zone_table_heading(rows, lookback_hi="सभी"):
             f'</div>')
 
 
-def render_zone_table(rows, title, subtitle, lookback_hi="सभी"):
-    """Renders the screenshot-style Hindi zone table (exact column set + links)."""
+def render_zone_table(rows, title, subtitle, lookback_hi="All"):
     st.markdown(f'<div class="phead"><span class="t">{title}</span>'
                 f'<span class="s">{subtitle}</span></div>', unsafe_allow_html=True)
     if not rows:
-        st.info("कोई VALID zone नहीं मिला। कृपया फ़िल्टर/स्कोर बदलें।")
+        st.info("No valid zones found. Try a lower score / wider timeframe.")
         return
     st.markdown(zone_table_heading(rows, lookback_hi), unsafe_allow_html=True)
     html = ['<div class="zwrap"><table class="zhin"><thead><tr>'
-            '<th>एससेट</th><th>✓ चार्ट खोलें</th><th>टाइमफ्रेम</th><th>दिशा</th>'
-            '<th>पैटर्न</th><th>टाइप</th><th>स्टेट</th><th>HQ</th>'
-            '<th>स्कोर</th><th>Entry</th><th>SL</th><th>OI</th><th>चेन</th>'
+            '<th>Asset</th><th>Chart</th><th>Timeframe</th><th>Direction</th>'
+            '<th>Pattern</th><th>Type</th><th>State</th><th>HQ</th>'
+            '<th>Score</th><th>Entry</th><th>SL</th><th>OI</th><th>Chain</th>'
             '</tr></thead><tbody>']
     for r in rows:
         disp = r["symbol"].replace(".NS", "")
         is_dem = r["dir"] == "Demand"
         dot = ('<span class="dot dem">●</span>' if is_dem else '<span class="dot sup">●</span>')
         tv = (f'<a href="{r["tv"]}" target="_blank">✓ Open</a>' if r.get("tv") else "—")
-        cat = (_cat_hi(r.get("cat", "")) if r.get("cat")
-               else _cat_hi("Continuation" if r.get("pattern", "").endswith(("D", "R")) else "Reversal"))
-        st_map = {"Fresh": "st-fresh", "Tested": "st-tested", "Broken": "st-broken"}
-        st_cls = st_map.get(r["state"], "")
-        state_txt = f'{_state_hi(r["state"])} (#{r.get("touches", 0)})'
+        symlink = (f'<a class="sym" href="{r["tv"]}" target="_blank" '
+                   f'title="TradingView {r["tf"]}">📈 {disp}</a>' if r.get("tv")
+                   else f'<span style="font-weight:700;color:#eaf1fb;">{disp}</span>')
+        state_txt = f'{r["state"]} (#{r.get("touches", 0)})'
         hq = '<span class="hq">⭐</span>' if r.get("hq") else ""
-        sc = r["score"]
-        score = f'<span class="zscore {_score_cls(sc)}">{sc}</span>'
-        chain = (f'<a href="{r["chain"]}" target="_blank">चेन ↗</a>' if r.get("chain") else "—")
+        score = f'<span class="zscore {_score_cls(r["score"])}">{r["score"]}</span>'
+        chain = (f'<a href="{r["chain"]}" target="_blank">OI ↗</a>' if r.get("chain") else "—")
         oi = _oi_badge(r.get("oi"), is_dem)
-        symlink = (f'<a class="sym" href="{r["tv"]}" target="_blank" title="TradingView '
-                   f'{r["tf"]}">📈 {disp}</a>' if r.get("tv") else f'<span class="sym">{disp}</span>')
         html.append(
             f'<tr><td>{symlink}</td><td>{tv}</td><td>{_tf_hi(r["tf"])}</td>'
-            f'<td>{dot} {_dir_hi(r["dir"])}</td><td>{r["pattern"]}</td><td>{cat}</td>'
-            f'<td class="{st_cls}">{state_txt}</td><td>{hq}</td><td>{score}</td>'
-            f'<td>{r["entry"]:,.2f}</td><td>{r["sl"]:,.2f}</td>'
+            f'<td>{dot} {r["dir"]}</td><td>{r["pattern"]}</td>'
+            f'<td>{r.get("cat", r.get("pattern_type", "Continuation"))}</td>'
+            f'<td class="st-{r["state"].lower()}">{state_txt}</td><td>{hq}</td>'
+            f'<td>{score}</td><td>{r["entry"]:,.2f}</td><td>{r["sl"]:,.2f}</td>'
             f'<td>{oi}</td><td>{chain}</td></tr>')
     html.append('</tbody></table></div>')
     st.markdown("".join(html), unsafe_allow_html=True)
-    st.caption("✓ चार्ट खोलें = उसी टायमफ्रेम का TradingView चार्ट; OI में Demand=P>C (bullish), "
-               "Supply=C>P (bearish); चेन = NSE option chain. टाइप: Reversal=उलटाव, "
-               "Continuation=जारी. स्कोर ≥90 = HQ.")
+    st.caption("Chart = TradingView at that TF. OI = live Put/Call OI (Demand lean-bullish when "
+               "P>C; Supply lean-bearish when C>P). Chain = NSE option chain. HQ = score ≥90.")
 
 
-
-# ── Sidebar (हिंदी) ─────────────────────────────────────────────────────────
+# ── Sidebar (collapsed by default, compact) ────────────────────────────────
 import zdata
 
-st.sidebar.markdown("## ⚙️ Scan Settings")
-scan_all = st.sidebar.toggle("सभी NSE फ्यूचर स्टॉक्स × Multi-Timeframe", value=True,
-                             help="पूरे F&O universe को चुने हुए timeframes में स्कैन करें. "
-                                  "बंद करने पर एक स्टॉक पर स्कैन होगा.")
-
+st.sidebar.markdown("## ⚙️ Scanner Settings")
+scan_all = st.sidebar.toggle("All NSE stocks × Multi-Timeframe", value=True,
+                             help="Scan the whole universe across selected timeframes. "
+                                  "Turn off for a single symbol.")
 if scan_all:
-    st.sidebar.markdown("<b>Universe चुनें</b><br><span style='font-size:10px;color:#8ba1c0;'>(NSE फ्यूचर स्टॉक्स चुनें — डिफ़ॉल्ट: सभी)</span>", unsafe_allow_html=True)
+    st.sidebar.markdown("**Universe**  (tap to add/remove)")
     sel_universe = st.sidebar.multiselect(
-        "Universe", zdata.FUT_STOCKS, default=list(zdata.FUT_STOCKS),
-        format_func=lambda x: x.replace(".NS", ""),
-        help="सिर्फ़ चुने स्टॉक स्कैन होंगे।")
+        "Stocks", zdata.FUT_STOCKS, default=list(zdata.DEFAULT_UNIVERSE),
+        format_func=lambda x: x.replace(".NS", ""), help="Default = top 30 (fast). Add more anytime.")
     if not sel_universe:
-        sel_universe = list(zdata.FUT_STOCKS)
-    st.sidebar.markdown("<b>Timeframes चुनें</b>", unsafe_allow_html=True)
+        sel_universe = list(zdata.DEFAULT_UNIVERSE)
+    st.sidebar.markdown("**Timeframes**<br><span style='font-size:10px;color:#8ba1c0;'>"
+                        "Intraday = live auto-refresh · Daily+ = scanned **once a day**</span>",
+                        unsafe_allow_html=True)
     univ_tfs = st.sidebar.multiselect(
-        "Timeframes", zdata.TIMEFRAMES, default=list(zdata.TIMEFRAMES),
+        "Timeframes", zdata.TIMEFRAMES, default=["15m", "30m", "1h", "2h", "4h",
+                                                 "1D", "1W", "1M"],
         format_func=_tf_hi,
-        help="Ctrl/Cmd से add/remove. 15m–8h = intraday, 1D/1W/1M = daily.")
+        help="15m-4h auto-refresh during the day. 1D/1W/1M (and 6h/8h) change only "
+             "once the day completes, so they are scanned once a day.")
     if not univ_tfs:
-        univ_tfs = ["2h", "4h"]
-    eod_filter = st.sidebar.toggle(
-        "सिर्फ़ आज की candle band (low−10% … high+10%) में", value=True,
-        help="सिर्फ़ उन zones को दिखाएँ जो आज के daily candle range ±10% के भीतर हैं।")
-    symbol = "RELIANCE.NS"
-    timeframe = "4h"
+        univ_tfs = ["15m", "30m", "1h", "2h", "4h"]
+    live_sel = [t for t in univ_tfs if t in LIVE_TFS]
+    stable_sel = [t for t in univ_tfs if t in STABLE_TFS]
+    auto_live = st.sidebar.toggle("Live auto-refresh (intraday)", value=True,
+                                  help="Automatically re-scan the fast timeframes; "
+                                       "slow timeframes stay cached.")
+    eod_filter = st.sidebar.toggle("Scan only in EOD band (high+10% … low−10%)", value=True,
+                                   help="Keep only zones inside today's daily close-candle "
+                                        "high+10% … low−10%.")
+    symbol, timeframe = "RELIANCE.NS", "4h"
 else:
-    sel_universe = None
-    univ_tfs = ["4h"]
-    symbol = st.sidebar.text_input("स्टॉक / प्रतीक", value="RELIANCE.NS",
-                                   help="^NSEI = Nifty, ^NSEBANK = Bank Nifty।")
-    timeframe = st.sidebar.selectbox("टाइमफ्रेम", zdata.TIMEFRAMES,
+    sel_universe, univ_tfs, live_sel, stable_sel = None, [], [], []
+    auto_live, eod_filter = False, True
+    symbol = st.sidebar.text_input("Symbol", value="RELIANCE.NS",
+                                   help="^NSEI = Nifty, ^NSEBANK = Bank Nifty.")
+    timeframe = st.sidebar.selectbox("Timeframe", zdata.TIMEFRAMES,
                                      index=zdata.TIMEFRAMES.index("4h"))
-    eod_filter = st.sidebar.toggle(
-        "सिर्फ़ EOD candle band (high+10% … low−10%) में स्कैन", value=True,
-        help="आज के daily close-candle high+10% से low−10% के भीतर ही zones स्कैन करें।")
 
-min_score = st.sidebar.slider("न्यूनतम स्कोर", 20, 90, 40, step=5)
-strict = st.sidebar.toggle("सख्त (spec-strict) नियम", value=False)
-recommended = st.sidebar.toggle("सुझाव सेटअप (DBD · mid · RR 1:3)", value=False,
-                                help="चालू करने पर सिर्फ़ DBD पैटर्न; बंद = सभी 4 पैटर्न (डिफ़ॉल्ट)।")
-active_only = st.sidebar.toggle("सिर्फ़ सक्रिय zones (Fresh/Tested)", value=True,
-                                help="सिर्फ़ ताज़ा/परीक्षित zones दिखाएँ (टूटे/Broken छिपाएँ)।")
-lookback = st.sidebar.selectbox("कितना पीछे देखें", ["सभी", "24", "12", "6", "3"])
-lookback_months = None if lookback == "सभी" else int(lookback)
+min_score = st.sidebar.slider("Min density score", 20, 90, 40, step=5)
+strict = st.sidebar.toggle("Spec-strict rules", value=False)
+recommended = st.sidebar.toggle("Recommended setup (DBD · RR1:3)", value=False)
+active_only = st.sidebar.toggle("Active zones only (Fresh/Tested)", value=True,
+                                help="Hide Broken zones.")
+lookback = st.sidebar.selectbox("Lookback", ["All", "24", "12", "6", "3"])
+lookback_months = None if lookback == "All" else int(lookback)
 st.sidebar.markdown("---")
-st.sidebar.caption("Live data: Yahoo/TradingView/NSE/niftytrader (keyless). आज की तारीख·समय "
+st.sidebar.caption("Live data: Yahoo / TradingView / NSE / niftytrader (keyless). "
                    f"{datetime.datetime.now().strftime('%d-%b %H:%M')} IST")
 
 
-# ── MAIN LAYOUT ─────────────────────────────────────────────────────────────
+# ── TOP: Zone Scanner ──────────────────────────────────────────────────────
 st.markdown("## 📊 Demand & Supply Zone Scanner")
-st.caption("सभी NSE फ्यूचर स्टॉक्स × सभी टाइमफ्रेम — DBR/RBR/RBD/DBD 4 पैटर्न। "
-           "हर row: ✓ चार्ट खोलें (TradingView) + OI + चेन लिंक।")
+st.caption("All NSE stocks × multi-timeframe · DBR/RBR/RBD/DBD · "
+           "tap any row for TradingView chart + live option OI.")
 
-render_board()
-render_sectors()
-st.markdown('<div style="height:4px;"></div>', unsafe_allow_html=True)
-
-r1, r2 = st.columns([1.0, 1.0], gap="small")
-with r1:
-    render_fiidii()
-with r2:
-    render_options(symbol)
-
-st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
-
-
-# ── Zone Scanner table (मुख्य / screenshot style) ──────────────────────────
 if scan_all:
     tf_tuple = tuple(univ_tfs)
-    rows = load_universe_zones(tf_tuple, min_score, recommended, strict,
-                               active_only=False, eod_filter=eod_filter,
-                               symbols_tuple=tuple(sel_universe))
-    st.markdown('<div class="phead"><span class="t">🧭 Zone स्कैन — सभी NSE फ्यूचर '
-                f'स्टॉक्स <span style="color:#4f8cff;">({len(sel_universe)} × '
+    rows = []
+    if live_sel:
+        rows += load_universe_live(tuple(live_sel), min_score, recommended, strict,
+                                   eod_filter, tuple(sel_universe))
+    if stable_sel:
+        rows += load_universe_stable(tuple(stable_sel), min_score, recommended, strict,
+                                     eod_filter, tuple(sel_universe), _day_key())
+    # auto-refresh the fast (live) timeframes only
+    if auto_live and live_sel:
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=90_000, key="mh_univ")
+    st.markdown(f'<div class="phead"><span class="t">🧭 Universe Zone Scan '
+                f'<span style="color:#4f8cff;">({len(sel_universe)} × '
                 f'{" · ".join(tf_tuple)})</span></span>'
-                f'<span class="s">live · cached 90s</span></div>', unsafe_allow_html=True)
+                f'<span class="s">{len(live_sel)} live TF (auto-refresh) · '
+                f'{len(stable_sel)} daily+ TF (scanned once a day)</span></div>',
+                unsafe_allow_html=True)
     if eod_filter:
-        st.caption("📌 EOD band ON: सिर्फ़ आज के daily close-candle "
-                   "**high+10% … low−10%** के भीतर के zones।")
-    # filters
+        st.caption("📌 EOD band ON — scanning only today's daily close-candle "
+                   "**high+10% … low−10%**.")
     f1, f2, f3 = st.columns([1, 1, 1])
-    dir_opt = f1.selectbox("दिशा", ["सभी", "Demand", "Supply"], index=0)
-    sort_opt = f2.selectbox("क्रम", ["स्कोर ↓", "एससेट", "दूरी"], index=0)
-    st_opt = f3.selectbox("स्टेट", ["सभी", "ताज़ा (Fresh)", "परीक्षित (Tested)"], index=0)
+    dir_opt = f1.selectbox("Direction", ["All", "Demand", "Supply"], index=0)
+    sort_opt = f2.selectbox("Sort", ["Score ↓", "Asset", "Distance"], index=0)
+    st_opt = f3.selectbox("State", ["All", "Fresh", "Tested"], index=0)
 
     rr = rows
     if active_only:
@@ -526,26 +516,26 @@ if scan_all:
         rr = [x for x in rr if x["dir"] == "Demand"]
     elif dir_opt == "Supply":
         rr = [x for x in rr if x["dir"] == "Supply"]
-    if st_opt == "ताज़ा (Fresh)":
+    if st_opt == "Fresh":
         rr = [x for x in rr if x["state"] == "Fresh"]
-    elif st_opt == "परीक्षित (Tested)":
+    elif st_opt == "Tested":
         rr = [x for x in rr if x["state"] == "Tested"]
-    if sort_opt == "स्कोर ↓":
+    if sort_opt == "Score ↓":
         rr = sorted(rr, key=lambda x: -x["score"])
-    elif sort_opt == "एससेट":
+    elif sort_opt == "Asset":
         rr = sorted(rr, key=lambda x: (x["symbol"], x["tf"]))
     else:
         rr = sorted(rr, key=lambda x: abs(x["last"] - x["entry"]) / x["entry"] if x["last"] else 0)
-    render_zone_table(rr, "सभी NSE फ्यूचर स्टॉक्स — सभी टाइमफ्रेम",
-                      f'{len(tf_tuple)} TF · {len(sel_universe)} स्टॉक')
+    render_zone_table(rr, "All NSE Futures Stocks — Multi-Timeframe",
+                      f'{len(tf_tuple)} TF · {len(sel_universe)} stocks', lookback_hi="All")
 else:
-    # single-stock scan rows -> same Hindi table (EOD band filter, default ON)
+    # single-stock scan -> same English table
     try:
         zones, df, extra = load_scan(symbol, timeframe, min_score, strict,
                                      lookback_months, recommended)
         last = float(df["close"].iloc[-1]) if df is not None and len(df) else None
     except Exception as ex:
-        st.error(f"स्कैन नहीं हो सका: {ex}")
+        st.error(f"Could not scan {symbol}: {ex}")
         zones, df, extra = [], None, None
         last = None
 
@@ -556,7 +546,7 @@ else:
     _lc = "".join(f'<a class="chip" href="{l["url"]}" target="_blank" '
                   f'style="text-decoration:none;">↗ {l["label"]}</a>' for l in _links)
     _tvchip = (f'<a class="chip t" href="{_tv.chart_url(symbol, timeframe)}" '
-               f'target="_blank" style="text-decoration:none;">📈 TradingView चार्ट</a>')
+               f'target="_blank" style="text-decoration:none;">📈 TradingView chart</a>')
     st.markdown(f'<div class="chips">{_tvchip}{_lc}</div>', unsafe_allow_html=True)
 
     band = None
@@ -565,54 +555,56 @@ else:
     if band:
         st.markdown(
             f'<div class="sumbar" style="margin-top:4px;">'
-            f'<span class="it"><span class="lbl">EOD band (आज)</span> '
+            f'<span class="it"><span class="lbl">EOD band</span> '
             f'low {band["lo"]:,.2f}−10% = {band["eod_lo"]:,.2f} … '
             f'high {band["hi"]:,.2f}+10% = {band["eod_hi"]:,.2f}</span>'
             f'</div>', unsafe_allow_html=True)
 
-    rows = []
-    for z in zones:
-        rows.append({
-            "symbol": symbol, "tf": timeframe,
-            "pattern": z.patternType,
-            "dir": "Demand" if z.isDemand else "Supply",
-            "cat": z.zoneCategory,
-            "entry": round(z.proxVal, 2),
-            "sl": round(z.slVal, 2),
-            "tp": round(z.tpVal, 2),
-            "score": z.densityScore,
-            "hq": bool(z.isHQ),
-            "state": z.state,
-            "touches": z.touchCount,
-            "last": last,
-            "chain": _links[0]["url"] if _links else "",
-            "tv": _tv.chart_url(symbol, timeframe),
-            "oi": _zs.oi_bias(symbol, z.isDemand),
-        })
+    rows = [{"symbol": symbol, "tf": timeframe, "pattern": z.patternType,
+             "dir": "Demand" if z.isDemand else "Supply", "cat": z.zoneCategory,
+             "entry": round(z.proxVal, 2), "sl": round(z.slVal, 2),
+             "tp": round(z.tpVal, 2), "score": z.densityScore, "hq": bool(z.isHQ),
+             "state": z.state, "touches": z.touchCount, "last": last,
+             "chain": _links[0]["url"] if _links else "",
+             "tv": _tv.chart_url(symbol, timeframe),
+             "oi": _zs.oi_bias(symbol, z.isDemand)} for z in zones]
     if active_only:
         rows = [r for r in rows if r["state"] in ("Fresh", "Tested")]
-    render_zone_table(rows, f"{symbol.replace('.NS','')} · {timeframe}",
-                      "सिंगल स्टॉक",
-                      lookback_hi=lookback if isinstance(lookback, str) else lookback)
+    render_zone_table(rows, f"{symbol.replace('.NS','')} · {_tf_hi(timeframe)}",
+                      "Single stock", lookback_hi=lookback)
 
     if isinstance(extra, dict) and extra.get("roi") and extra["roi"].get("n_trades"):
         roi, rec = extra["roi"], extra["recommended"]
-        st.success(f"**सुझाव ROI** (DBD · mid · RR 1:{rec['targetRR']:.1f}): "
-                   f"{roi['n_trades']} ट्रेड · win {roi['win_pct']:.0f}% · "
+        st.success(f"**Recommended ROI** (DBD · mid · RR 1:{rec['targetRR']:.1f}): "
+                   f"{roi['n_trades']} trades · win {roi['win_pct']:.0f}% · "
                    f"**{roi['net_roi_pct']:+.2f}%**")
 
 
-# ── News + Events (हिंदी हेडलाइन) ─────────────────────────────────────────
+# ── MID: Market board + Sector indices (compact tables) ────────────────────
+st.markdown('<div style="height:14px;"></div>', unsafe_allow_html=True)
+render_board()
+st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+render_sectors()
+
 st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
+r1, r2 = st.columns([1.0, 1.0], gap="small")
+with r1:
+    render_fiidii()
+with r2:
+    render_options(symbol)
+
+
+# ── BOTTOM: News (हिंदी) + Events (हिंदी), live ────────────────────────────
+st.markdown('<div style="height:14px;"></div>', unsafe_allow_html=True)
 nc1, nc2 = st.columns([1.15, 1.0], gap="small")
 
 with nc1:
-    st.markdown("## 📰 महत्वपूर्ण समाचार <span class='s'>हिंदी हेडलाइन · tap = खोलें</span>",
+    st.markdown("## 📰 News <span class='s'>हिंदी हेडलाइन · tap = open original · live</span>",
                 unsafe_allow_html=True)
     ns = load_news()
     if not ns:
-        st.info("अभी headlinés उपलब्ध नहीं।")
-    for it in ns[:12]:
+        st.info("No headlines right now.")
+    for it in ns[:10]:
         hi_title = _hi(it["title"])
         tags = "".join(f'<span class="chip t">{t}</span>' for t in it["tags"])
         tm = it["published"]
@@ -623,21 +615,22 @@ with nc1:
             f'target="_blank">{hi_title}</a>'
             f'<div>{tags}<span class="news-src"> · {it["source"]} · '
             f'<a href="{it["link"]}" target="_blank" style="color:#8ba1c0;">'
-            f'मूल देखें ↗</a></span></div></div></div>', unsafe_allow_html=True)
-        with st.expander("📖 पूरा पढ़ें"):
-            body = load_news_body(it["link"]) or it.get("summary") or "पूरा text उपलब्ध नहीं।"
-            st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
-                        f'white-space:pre-line;max-height:330px;overflow:auto;">{body}</div>',
-                        unsafe_allow_html=True)
-            st.markdown(f'<div style="margin-top:4px;"><a href="{it["link"]}" '
-                        f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
+            f'original ↗</a></span></div></div></div>', unsafe_allow_html=True)
+        if it["link"].startswith("http"):
+            with st.expander("📖 Read full"):
+                body = load_news_body(it["link"]) or it.get("summary") or "Full text unavailable."
+                st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
+                            f'white-space:pre-line;max-height:330px;overflow:auto;">{body}</div>',
+                            unsafe_allow_html=True)
+                st.markdown(f'<div style="margin-top:4px;"><a href="{it["link"]}" '
+                            f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
 
 with nc2:
-    st.markdown("## ⚡ NSE & फ्यूचर इवेंट <span class='s'>हिंदी · tap = खोलें</span>",
+    st.markdown("## ⚡ NSE & Futures Events <span class='s'>हिंदी · tap = open · live</span>",
                 unsafe_allow_html=True)
     ev = load_events()
     if ev:
-        for it in ev[:12]:
+        for it in ev[:10]:
             hi_title = _hi(it["title"])
             stamps = "".join(f'<span class="chip">{s}</span>' for s in it["stocks"])
             tick = (f'<span class="chip t">{it["tick"]}</span>' if it["tick"] and not it["stocks"] else "")
@@ -650,18 +643,19 @@ with nc2:
                 f'<a href="{it["link"]}" target="_blank" style="color:#dbe7fb;'
                 f'text-decoration:none;">{hi_title}</a></div>'
                 f'<div class="news-src">{it["source"]}</div></div></div>', unsafe_allow_html=True)
-            with st.expander("📖 और पढ़ें"):
-                bd = load_news_body(it["link"])
-                st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
-                            f'white-space:pre-line;max-height:330px;overflow:auto;">'
-                            f'{bd or "पूरा text उपलब्ध नहीं।"}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div style="margin-top:4px;"><a href="{it["link"]}" '
-                            f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
+            if it["link"].startswith("http"):
+                with st.expander("📖 Read more"):
+                    bd = load_news_body(it["link"])
+                    st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
+                                f'white-space:pre-line;max-height:330px;overflow:auto;">'
+                                f'{bd or "Full text unavailable."}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="margin-top:4px;"><a href="{it["link"]}" '
+                                f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
     else:
-        st.info("अभी इवेंट उपलब्ध नहीं।")
+        st.info("No events right now.")
 
 
 st.markdown("---")
-st.caption("MarketHub · Zone Screener (हिंदी) + Live Terminal. Quotes: Yahoo/TradingView; "
-           "flows: NSE/niftytrader; news & events: RSS. निवेश सलाह नहीं। "
-           f"आज: {datetime.datetime.now().strftime('%d-%b-%Y %H:%M')} IST")
+st.caption("MarketHub · Zone Scanner (Universe + multi-timeframe). Quotes: Yahoo/TradingView; "
+           "flows: NSE/niftytrader; news & events: RSS. Not investment advice. "
+           f"Today: {datetime.datetime.now().strftime('%d-%b-%Y %H:%M')} IST")
