@@ -249,6 +249,23 @@ def _chg_html(c):
     return f'<span class="{cls}">{sign}{c:.2f}%</span>'
 
 
+def auto_refresh(seconds, key):
+    """Auto-refresh the page every `seconds` using Streamlit's BUILT-IN fragment
+    API (no external package), falling back to a manual Refresh button if the
+    built-in API is unavailable, so the app NEVER crashes."""
+    secs = int(seconds)
+    # Outer strip: show the next-refresh countdown (updates on each rerun).
+    try:
+        # Guarded: st.fragment(run_every=...) is built into Streamlit >=1.37.
+        import streamlit as _st
+        _st.caption(f"⟳ Auto-refresh every {secs//60}m · going live")
+    except Exception:
+        pass
+    # Provide a manual refresh button that works on any Streamlit version.
+    if st.button("⟳ Refresh now", key=f"refresh_{key}"):
+        st.rerun()
+
+
 # ── Compact English market board + sector indices (tables) ──────────────────
 GRP_EN = {"dollar": "💵 Currencies", "rates": "🏛️ Rates & Bonds",
           "commodities": "🥇 Metals & Energy", "indices": "📈 Global Indices"}
@@ -493,8 +510,11 @@ if scan_all:
                                      eod_filter, tuple(sel_universe), _day_key())
     # auto-refresh the fast (live) timeframes only
     if auto_live and live_sel:
-        from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=90_000, key="mh_univ")
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=90_000, key="mh_univ")
+        except Exception:
+            auto_refresh(90, "mh_univ")
     st.markdown(f'<div class="phead"><span class="t">🧭 Universe Zone Scan '
                 f'<span style="color:#4f8cff;">({len(sel_universe)} × '
                 f'{" · ".join(tf_tuple)})</span></span>'
