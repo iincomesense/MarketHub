@@ -335,6 +335,9 @@ def render_fiidii():
 def _oi_badge(oi, is_demand):
     if not oi:
         return '<span class="oi none">—</span>'
+    if isinstance(oi, dict):
+        cls = "plus" if oi.get("aligned") else "minus"
+        return f'<span class="oi {cls}" title="Put OI vs Call OI">{oi["label"]}</span>'
     aligned = (oi.startswith("P>") if is_demand else oi.startswith("C>"))
     cls = "plus" if aligned else "minus"
     return f'<span class="oi {cls}">{oi}</span>'
@@ -431,8 +434,9 @@ def render_zone_table(rows, title, subtitle, lookback_hi="सभी"):
 import zdata
 
 st.sidebar.markdown("## ⚙️ Scan Settings")
-scan_all = st.sidebar.toggle("Universe + Timeframes से स्कैन करें", value=False,
-                             help="पूरे F&O universe को चुने हुए timeframes में स्कैन करें.")
+scan_all = st.sidebar.toggle("सभी NSE फ्यूचर स्टॉक्स × Multi-Timeframe", value=True,
+                             help="पूरे F&O universe को चुने हुए timeframes में स्कैन करें. "
+                                  "बंद करने पर एक स्टॉक पर स्कैन होगा.")
 
 if scan_all:
     st.sidebar.markdown("<b>Universe चुनें</b><br><span style='font-size:10px;color:#8ba1c0;'>(NSE फ्यूचर स्टॉक्स चुनें — डिफ़ॉल्ट: सभी)</span>", unsafe_allow_html=True)
@@ -467,7 +471,10 @@ else:
 
 min_score = st.sidebar.slider("न्यूनतम स्कोर", 20, 90, 40, step=5)
 strict = st.sidebar.toggle("सख्त (spec-strict) नियम", value=False)
-recommended = st.sidebar.toggle("सुझाव सेटअप (DBD · mid · RR 1:3)", value=True)
+recommended = st.sidebar.toggle("सुझाव सेटअप (DBD · mid · RR 1:3)", value=False,
+                                help="चालू करने पर सिर्फ़ DBD पैटर्न; बंद = सभी 4 पैटर्न (डिफ़ॉल्ट)।")
+active_only = st.sidebar.toggle("सिर्फ़ सक्रिय zones (Fresh/Tested)", value=True,
+                                help="सिर्फ़ ताज़ा/परीक्षित zones दिखाएँ (टूटे/Broken छिपाएँ)।")
 lookback = st.sidebar.selectbox("कितना पीछे देखें", ["सभी", "24", "12", "6", "3"])
 lookback_months = None if lookback == "सभी" else int(lookback)
 st.sidebar.markdown("---")
@@ -477,7 +484,8 @@ st.sidebar.caption("Live data: Yahoo/TradingView/NSE/niftytrader (keyless). आ�
 
 # ── MAIN LAYOUT ─────────────────────────────────────────────────────────────
 st.markdown("## 📊 Demand & Supply Zone Scanner")
-st.caption("DBR/RBR/RBD/DBD — सभी 4 पैटर्न करें। हर row: ✓ चार्ट खोलें (TradingView) + OI + चेन लिंक।")
+st.caption("सभी NSE फ्यूचर स्टॉक्स × सभी टाइमफ्रेम — DBR/RBR/RBD/DBD 4 पैटर्न। "
+           "हर row: ✓ चार्ट खोलें (TradingView) + OI + चेन लिंक।")
 
 render_board()
 render_sectors()
@@ -512,6 +520,8 @@ if scan_all:
     st_opt = f3.selectbox("स्टेट", ["सभी", "ताज़ा (Fresh)", "परीक्षित (Tested)"], index=0)
 
     rr = rows
+    if active_only:
+        rr = [x for x in rr if x["state"] in ("Fresh", "Tested")]
     if dir_opt == "Demand":
         rr = [x for x in rr if x["dir"] == "Demand"]
     elif dir_opt == "Supply":
@@ -579,6 +589,8 @@ else:
             "tv": _tv.chart_url(symbol, timeframe),
             "oi": _zs.oi_bias(symbol, z.isDemand),
         })
+    if active_only:
+        rows = [r for r in rows if r["state"] in ("Fresh", "Tested")]
     render_zone_table(rows, f"{symbol.replace('.NS','')} · {timeframe}",
                       "सिंगल स्टॉक",
                       lookback_hi=lookback if isinstance(lookback, str) else lookback)
