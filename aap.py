@@ -18,6 +18,7 @@ import os
 import sys
 import datetime
 import requests
+from urllib.parse import quote
 import streamlit as st
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,18 +43,20 @@ st.markdown("""
 [data-testid="stExpander"]{background-color:#121a2b;}
 [data-testid="stExpander"] *{color:#e6edf7;}
 
-/* compact board table */
-.board-table{width:100%; border-collapse:collapse; font-size:12px;}
-.board-table th{text-align:left; color:var(--muted); font-size:10.5px; text-transform:uppercase;
-  letter-spacing:.4px; padding:5px 8px; border-bottom:1px solid var(--line);}
-.board-table td{padding:5px 8px; border-bottom:1px solid #18233a; color:#d9e5f6;
-  font-variant-numeric:tabular-nums;}
-.board-table tr:hover{background:#131d31;}
-.board-table td.sym{font-weight:700; color:#eaf1fb;}
-.board-table td.nm{color:#8ba1c0; font-size:10.5px;}
-.board-table .grp td{background:#0e1626; color:var(--accent2); font-size:10px;
-  font-weight:800; text-transform:uppercase; letter-spacing:1.2px;}
-.board-table .src{color:#5a6c8a; font-size:9px;}
+/* compact board table (small) */
+.board-table{width:100%; border-collapse:collapse; font-size:10.5px;}
+.board-table th{text-align:left; color:var(--muted); font-size:9.5px; text-transform:uppercase;
+  letter-spacing:.3px; padding:3px 6px; border-bottom:1px solid var(--line); white-space:nowrap;}
+.board-table td{padding:2.5px 6px; border-bottom:1px solid #161f33; color:#d9e5f6;
+  font-variant-numeric:tabular-nums; white-space:nowrap;}
+.board-table tr:hover{background:#121a2c;}
+.board-table a.sym{font-weight:700; color:#eaf1fb; text-decoration:none;}
+.board-table a.sym:hover{color:var(--accent2); text-decoration:underline;}
+.board-table td.nm{color:#8ba1c0; font-size:9.5px;}
+.board-table .grp td{background:#0e1626; color:var(--accent2); font-size:9px;
+  font-weight:800; text-transform:uppercase; letter-spacing:1px; padding:3px 6px;}
+.board-table .src{color:#5a6c8a; font-size:8.5px;}
+.board-table td.tv{color:var(--accent2); font-weight:700; font-size:11px;}
 
 .phead{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap;}
 .phead .t{font-size:15px; font-weight:800; color:#eaf1fb;}
@@ -69,14 +72,18 @@ st.markdown("""
 .sumbar .sep{color:var(--muted);}
 .sumbar .lbl{color:var(--muted); font-size:10.5px;}
 
-/* Hindi zone table — horizontally scrollable */
-.zwrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:#0e1626;}
+/* Hindi zone table — horizontally AND vertically scrollable (no zone is cut off) */
+.zwrap{overflow:auto; max-height:560px; border:1px solid var(--line); border-radius:12px;
+  background:#0e1626; scrollbar-width:thin;}
 .zhin{width:100%; border-collapse:collapse; font-size:12px; min-width:1080px;}
-.zhin th{text-align:left; color:var(--muted); font-size:10.5px; text-transform:uppercase;
-  letter-spacing:.4px; padding:7px 8px; border-bottom:1px solid var(--line);
-  background:#0c1422; white-space:nowrap;}
+.zhin thead th{position:sticky; top:0; z-index:3; text-align:left; color:var(--muted);
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; padding:7px 8px;
+  border-bottom:1px solid var(--line); background:#0c1422; white-space:nowrap;}
 .zhin td{padding:6px 8px; border-bottom:1px solid #18233a; color:#d9e5f6;
   font-variant-numeric:tabular-nums; white-space:nowrap;}
+.zhin tr.near:hover{background:#13233a;}
+.zhin td.near-up{color:var(--up);}
+.zhin .zm{font-size:10px; color:var(--muted);}
 .zhin tr:hover{background:#131d31;}
 .zhin a{color:var(--accent2); text-decoration:none; font-weight:600;}
 .zhin a.sym{color:#eaf1fb; font-weight:700;}
@@ -109,6 +116,17 @@ st.markdown("""
 .news-title{color:#dbeeef; font-size:13px; font-weight:600; text-decoration:none;}
 .news-body a{text-decoration:none; word-break:break-word;}
 .news-src{color:var(--muted); font-size:10px;}
+/* live notification */
+.livebox{display:flex; gap:10px; align-items:center; background:linear-gradient(90deg,#12233f,#0e1626);
+  border:1px solid rgba(255,75,92,.35); border-radius:12px; padding:8px 11px; margin:4px 0 10px;}
+.livebox .pulse{display:inline-block; width:9px; height:9px; border-radius:50%;
+  background:#ff4b5c; box-shadow:0 0 0 0 rgba(255,75,92,.7); animation:pulse 1.6s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,75,92,.7);}
+  70%{box-shadow:0 0 0 8px rgba(255,75,92,0);} 100%{box-shadow:0 0 0 0 rgba(255,75,92,0);}}
+.livebox .lbt{font-size:9.5px; letter-spacing:1px; color:#ff8b96; font-weight:800; white-space:nowrap;}
+.livebox .lbtitle{font-size:12.5px; font-weight:600; color:#f2f6ff; line-height:1.35;}
+.livebox a{color:inherit; text-decoration:none;}
+.livebox a:hover{color:var(--accent2);}
 .chip{font-size:11px; background:#152036; border:1px solid var(--line);
   color:#cfe0ff; border-radius:20px; padding:2px 9px; display:inline-block;}
 .chip.t{background:#1a2740; color:var(--accent2);}
@@ -276,38 +294,47 @@ def render_board():
     data = load_market()
     st.markdown('<div class="phead"><span class="t">🌍 Live Market Board '
                 '<span style="color:#1ecb6b;font-size:11px;">● LIVE</span></span>'
-                '<span class="s">auto-refresh 30s</span></div>', unsafe_allow_html=True)
-    html = ['<table class="board-table"><thead><tr><th>Symbol</th><th>Name</th>'
-            '<th>Last</th><th>Chg%</th><th></th></tr></thead><tbody>']
+                '<span class="s">auto-refresh 30s · tap a symbol to open chart</span></div>',
+                unsafe_allow_html=True)
+    html = ['<table class="board-table"><thead><tr><th>Symbol</th><th>Last</th>'
+            '<th>Chg%</th><th>Chart</th></tr></thead><tbody>']
     for grp, tiles in md.TILES:
-        html.append(f'<tr class="grp"><td colspan="5">{GRP_EN.get(grp, grp)}</td></tr>')
+        html.append(f'<tr class="grp"><td colspan="4">{GRP_EN.get(grp, grp)}</td></tr>')
         for t in tiles:
             q = data[t["label"]]
             px = f"{q['price']:,.2f}" if q["price"] is not None else "—"
-            src = "TV" if q["src"] == "tv" else "Y"
-            html.append(f'<tr><td class="sym">{t["label"]}</td>'
-                        f'<td class="nm">{t["name"]}</td><td>{px}</td>'
-                        f'<td>{_chg_html(q["chg_pct"])}</td><td class="src">{src}</td></tr>')
+            _tv_sym = md.tv_chart_symbol(t["label"])
+            _tv_url = f'https://www.tradingview.com/chart/?symbol={quote(_tv_sym)}&interval=1D'
+            html.append(f'<tr><td><a class="sym" href="{_tv_url}" target="_blank" '
+                        f'title="Open {t["label"]} on TradingView">📈 {t["label"]}</a></td>'
+                        f'<td>{px}</td>'
+                        f'<td>{_chg_html(q["chg_pct"])}</td>'
+                        f'<td class="tv"><a href="{_tv_url}" target="_blank" title="Chart">➜</a></td></tr>')
     html.append('</tbody></table>')
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
 def render_sectors():
+    import sectors as sc
     sec = load_sectors()
     if not sec:
         return
     st.markdown('<div class="phead"><span class="t">🧱 Live Sector Indices '
                 '<span style="color:#1ecb6b;font-size:11px;">● LIVE</span></span>'
-                '<span class="s">NSE · 30s</span></div>', unsafe_allow_html=True)
+                '<span class="s">NSE · 30s · tap an index to open chart</span></div>',
+                unsafe_allow_html=True)
     html = ['<table class="board-table"><thead><tr><th>Index</th><th>Last</th>'
-            '<th>Chg%</th><th>Src</th></tr></thead><tbody>']
+            '<th>Chg%</th><th>Chart</th></tr></thead><tbody>']
     for s in sec:
         cls = "up" if s["chg_pct"] >= 0 else "dn"
         sign = "+" if s["chg_pct"] >= 0 else "−"
-        html.append(f'<tr><td class="sym">{s["label"]}</td>'
+        _tv_sym = sc.tv_chart_symbol(s["full"])
+        _tv_url = f'https://www.tradingview.com/chart/?symbol={quote(_tv_sym)}&interval=1D'
+        html.append(f'<tr><td><a class="sym" href="{_tv_url}" target="_blank" '
+                    f'title="Open {s["label"]} on TradingView">📈 {s["label"]}</a></td>'
                     f'<td>{s["price"]:,.1f}</td>'
                     f'<td class="{cls}">{sign}{s["chg_pct"]:.2f}%</td>'
-                    f'<td class="src">{s["src"]}</td></tr>')
+                    f'<td class="tv"><a href="{_tv_url}" target="_blank" title="Chart">➜</a></td></tr>')
     html.append('</tbody></table>')
     st.markdown("".join(html), unsafe_allow_html=True)
 
@@ -382,13 +409,13 @@ def render_options(symbol):
 
 
 # ── Zone table (English headers, screenshot-style) ──────────────────────────
-def zone_table_heading(rows, lookback_hi="All"):
+def zone_table_heading(rows, lookback_hi="All", scan_time=None):
     fresh = sum(1 for r in rows if r["state"] == "Fresh")
     tested = sum(1 for r in rows if r["state"] == "Tested")
     hq = sum(1 for r in rows if r["hq"])
-    now = datetime.datetime.now().strftime("%H:%M:%S")
+    now = (scan_time or datetime.datetime.now()).strftime("%d-%b %H:%M:%S")
     return (f'<div class="sumbar">'
-            f'<span class="it"><span class="lbl">Last scan</span> {now}</span>'
+            f'<span class="it"><span class="lbl">Last scan ⟳</span> <b>{now}</b></span>'
             f'<span class="sep">|</span>'
             f'<span class="it"><b>{len(rows)}</b> <span class="lbl">Zones</span></span>'
             f'<span class="sep">|</span>'
@@ -402,13 +429,13 @@ def zone_table_heading(rows, lookback_hi="All"):
             f'</div>')
 
 
-def render_zone_table(rows, title, subtitle, lookback_hi="All"):
+def render_zone_table(rows, title, subtitle, lookback_hi="All", scan_time=None):
     st.markdown(f'<div class="phead"><span class="t">{title}</span>'
                 f'<span class="s">{subtitle}</span></div>', unsafe_allow_html=True)
     if not rows:
         st.info("No valid zones found. Try a lower score / wider timeframe.")
         return
-    st.markdown(zone_table_heading(rows, lookback_hi), unsafe_allow_html=True)
+    st.markdown(zone_table_heading(rows, lookback_hi, scan_time), unsafe_allow_html=True)
     html = ['<div class="zwrap"><table class="zhin"><thead><tr>'
             '<th>Asset</th><th>Chart</th><th>Timeframe</th><th>Direction</th>'
             '<th>Pattern</th><th>Type</th><th>State</th><th>HQ</th>'
@@ -427,17 +454,31 @@ def render_zone_table(rows, title, subtitle, lookback_hi="All"):
         score = f'<span class="zscore {_score_cls(r["score"])}">{r["score"]}</span>'
         chain = (f'<a href="{r["chain"]}" target="_blank">OI ↗</a>' if r.get("chain") else "—")
         oi = _oi_badge(r.get("oi"), is_dem)
+        # distance of the zone to the current price (near/upcoming marker + badge)
+        dist = r.get("_dist")
+        dist_badge = ""
+        near_cls = ""
+        if dist is not None:
+            d = dist * 100.0
+            dist_badge = f'<span class="zm" title="% away from current LTP">🎯 {d:.1f}%</span>'
+            if d <= 2.0:
+                near_cls = ' class="near"'
+                dist_badge = f'<span class="zm near-up" title="Near / upcoming">🎯 {d:.1f}%</span>'
         html.append(
-            f'<tr><td>{symlink}</td><td>{tv}</td><td>{_tf_hi(r["tf"])}</td>'
-            f'<td>{dot} {r["dir"]}</td><td>{r["pattern"]}</td>'
+            f'<tr{near_cls}><td>{symlink}</td><td>{tv}</td><td>{_tf_hi(r["tf"])}</td>'
+            f'<td>{dot} {r["dir"]} <span style="display:block;">{dist_badge}</span></td>'
+            f'<td>{r["pattern"]}</td>'
             f'<td>{r.get("cat", r.get("pattern_type", "Continuation"))}</td>'
             f'<td class="st-{r["state"].lower()}">{state_txt}</td><td>{hq}</td>'
             f'<td>{score}</td><td>{r["entry"]:,.2f}</td><td>{r["sl"]:,.2f}</td>'
             f'<td>{oi}</td><td>{chain}</td></tr>')
     html.append('</tbody></table></div>')
     st.markdown("".join(html), unsafe_allow_html=True)
-    st.caption("Chart = TradingView at that TF. OI = live Put/Call OI (Demand lean-bullish when "
-               "P>C; Supply lean-bearish when C>P). Chain = NSE option chain. HQ = score ≥90.")
+    st.caption("Sort = Near/Upcoming (closest to current LTP first). 🎯 % = distance of the zone "
+               "entry from the current price (≤2% = near-upcoming, highlighted). "
+               "Chart = TradingView at that TF. OI = live Put/Call OI (Demand lean-bullish when "
+               "P>C; Supply lean-bearish when C>P). Chain = that stock's NSE option chain. "
+               "Scroll the table up/down — every scanned zone is shown.")
 
 
 # ── Sidebar (collapsed by default, compact) ────────────────────────────────
@@ -494,6 +535,12 @@ st.sidebar.caption("Live data: Yahoo / TradingView / NSE / niftytrader (keyless)
                    f"{datetime.datetime.now().strftime('%d-%b %H:%M')} IST")
 
 
+# state that flows from the zone scan into the Options OI panel (below)
+scanned_symbols = []      # unique symbols that produced zones
+opt_symbol = None         # default stock to show option-chain / OI for
+_scan_ts = None           # last universe-scan timestamp (current update time)
+
+
 # ── TOP: Zone Scanner ──────────────────────────────────────────────────────
 st.markdown("## 📊 Demand & Supply Zone Scanner")
 st.caption("All NSE stocks × multi-timeframe · DBR/RBR/RBD/DBD · "
@@ -524,9 +571,12 @@ if scan_all:
     if eod_filter:
         st.caption("📌 EOD band ON — scanning only today's daily close-candle "
                    "**high+10% … low−10%**.")
+    # record the CURRENT update/scan time (refresh keeps this live)
+    _scan_ts = datetime.datetime.now()
+
     f1, f2, f3 = st.columns([1, 1, 1])
     dir_opt = f1.selectbox("Direction", ["All", "Demand", "Supply"], index=0)
-    sort_opt = f2.selectbox("Sort", ["Score ↓", "Asset", "Distance"], index=0)
+    sort_opt = f2.selectbox("Sort", ["Near / Upcoming", "Score ↓", "Asset"], index=0)
     st_opt = f3.selectbox("State", ["All", "Fresh", "Tested"], index=0)
 
     rr = rows
@@ -540,14 +590,33 @@ if scan_all:
         rr = [x for x in rr if x["state"] == "Fresh"]
     elif st_opt == "Tested":
         rr = [x for x in rr if x["state"] == "Tested"]
-    if sort_opt == "Score ↓":
+
+    # "Near / Upcoming" = the zone closest to the current price first (the NEXT
+    # zones the stock is likely to reach).  Everything scrolls, so nothing is missed.
+    def _dist(x):
+        return abs(x["last"] - x["entry"]) / x["entry"] if x["last"] else 1e9
+    for x in rr:
+        x["_dist"] = _dist(x)
+    if sort_opt == "Near / Upcoming":
+        rr = sorted(rr, key=lambda x: (x["_dist"], -x["score"]))
+    elif sort_opt == "Score ↓":
         rr = sorted(rr, key=lambda x: -x["score"])
-    elif sort_opt == "Asset":
+    else:  # Asset
         rr = sorted(rr, key=lambda x: (x["symbol"], x["tf"]))
-    else:
-        rr = sorted(rr, key=lambda x: abs(x["last"] - x["entry"]) / x["entry"] if x["last"] else 0)
+
+    # carry scanned-symbol set + default option stock (best score)
+    seen = set()
+    for x in rr:
+        sym = x["symbol"]
+        if sym not in seen:
+            seen.add(sym)
+            scanned_symbols.append(sym)
+    if scanned_symbols and not opt_symbol:
+        opt_symbol = max(rr, key=lambda x: x["score"])["symbol"]
+
     render_zone_table(rr, "All NSE Futures Stocks — Multi-Timeframe",
-                      f'{len(tf_tuple)} TF · {len(sel_universe)} stocks', lookback_hi="All")
+                      f'{len(tf_tuple)} TF · {len(sel_universe)} stocks · '
+                      f'{len(rr)} zones', lookback_hi="All", scan_time=_scan_ts)
 else:
     # single-stock scan -> same English table
     try:
@@ -590,8 +659,11 @@ else:
              "oi": _zs.oi_bias(symbol, z.isDemand)} for z in zones]
     if active_only:
         rows = [r for r in rows if r["state"] in ("Fresh", "Tested")]
+    _scan_ts = datetime.datetime.now()
+    scanned_symbols = [symbol]
+    opt_symbol = symbol
     render_zone_table(rows, f"{symbol.replace('.NS','')} · {_tf_hi(timeframe)}",
-                      "Single stock", lookback_hi=lookback)
+                      "Single stock", lookback_hi=lookback, scan_time=_scan_ts)
 
     if isinstance(extra, dict) and extra.get("roi") and extra["roi"].get("n_trades"):
         roi, rec = extra["roi"], extra["recommended"]
@@ -611,7 +683,19 @@ r1, r2 = st.columns([1.0, 1.0], gap="small")
 with r1:
     render_fiidii()
 with r2:
-    render_options(symbol)
+    # Option chain / OI for the SCANNED stock (not Nifty).  Default = best stock
+    # that produced a zone; switch to any other scanned stock via the selector.
+    opts = scanned_symbols or ([symbol] if symbol else [])
+    if opts:
+        _disp = {s.replace(".NS", ""): s for s in opts}
+        _names = list(_disp.keys())
+        _default = (opt_symbol or opts[0]).replace(".NS", "")
+        if _default not in _names:
+            _default = _names[0]
+        picked = st.selectbox("🎯 Options OI — stock", _names, index=_names.index(_default))
+        render_options(_disp[picked])
+    else:
+        render_options(symbol)
 
 
 # ── BOTTOM: News (हिंदी) + Events (हिंदी), live ────────────────────────────
@@ -619,38 +703,76 @@ st.markdown('<div style="height:14px;"></div>', unsafe_allow_html=True)
 nc1, nc2 = st.columns([1.15, 1.0], gap="small")
 
 with nc1:
-    st.markdown("## 📰 News <span class='s'>हिंदी हेडलाइन · tap = open original · live</span>",
+    st.markdown("## 📰 News <span class='s'>हिंदी हेडलाइन · tap = read · live</span>",
                 unsafe_allow_html=True)
     ns = load_news()
     if not ns:
         st.info("No headlines right now.")
-    for it in ns[:10]:
-        hi_title = _hi(it["title"])
-        tags = "".join(f'<span class="chip t">{t}</span>' for t in it["tags"])
-        tm = it["published"]
-        tms = tm.strftime("%H:%M") if hasattr(tm, "strftime") else str(tm)[:5]
+    else:
+        # 🔴 LIVE notification — today's top/breaking story, tap to read
+        top = ns[0]
+        ttop = top["published"]
+        t_hi = _hi(top["title"])
         st.markdown(
-            f'<div class="news-item"><div class="news-time">{tms}</div>'
-            f'<div class="news-body"><a class="news-title" href="{it["link"]}" '
-            f'target="_blank">{hi_title}</a>'
-            f'<div>{tags}<span class="news-src"> · {it["source"]} · '
-            f'<a href="{it["link"]}" target="_blank" style="color:#8ba1c0;">'
-            f'original ↗</a></span></div></div></div>', unsafe_allow_html=True)
-        if it["link"].startswith("http"):
-            with st.expander("📖 Read full"):
-                body = load_news_body(it["link"]) or it.get("summary") or "Full text unavailable."
+            f'<div class="livebox"><span class="pulse"></span>'
+            f'<span class="lbt">🔴 LIVE</span>'
+            f'<a class="lbtitle" href="{top["link"]}" target="_blank" '
+            f'title="Open original">दिन का प्रमुख · {t_hi}</a></div>',
+            unsafe_allow_html=True)
+        if top["link"].startswith("http"):
+            with st.expander("📖 इस समाचार को पढ़ें (tap to read)"):
+                body = load_news_body(top["link"]) or top.get("summary") or "Full text unavailable."
                 st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
                             f'white-space:pre-line;max-height:330px;overflow:auto;">{body}</div>',
                             unsafe_allow_html=True)
-                st.markdown(f'<div style="margin-top:4px;"><a href="{it["link"]}" '
+                st.markdown(f'<div style="margin-top:4px;"><a href="{top["link"]}" '
                             f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
+        # today's top headlines (the rest)
+        for it in ns[1:11]:
+            hi_title = _hi(it["title"])
+            tags = "".join(f'<span class="chip t">{t}</span>' for t in it["tags"])
+            tm = it["published"]
+            tms = tm.strftime("%H:%M") if hasattr(tm, "strftime") else str(tm)[:5]
+            st.markdown(
+                f'<div class="news-item"><div class="news-time">{tms}</div>'
+                f'<div class="news-body"><a class="news-title" href="{it["link"]}" '
+                f'target="_blank">{hi_title}</a>'
+                f'<div>{tags}<span class="news-src"> · {it["source"]} · '
+                f'<a href="{it["link"]}" target="_blank" style="color:#8ba1c0;">'
+                f'original ↗</a></span></div></div></div>', unsafe_allow_html=True)
+            if it["link"].startswith("http"):
+                with st.expander("📖 पढ़ें"):
+                    body = load_news_body(it["link"]) or it.get("summary") or "Full text unavailable."
+                    st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
+                                f'white-space:pre-line;max-height:330px;overflow:auto;">{body}</div>',
+                                unsafe_allow_html=True)
+                    st.markdown(f'<div style="margin-top:4px;"><a href="{it["link"]}" '
+                                f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
 
 with nc2:
     st.markdown("## ⚡ NSE & Futures Events <span class='s'>हिंदी · tap = open · live</span>",
                 unsafe_allow_html=True)
     ev = load_events()
     if ev:
-        for it in ev[:10]:
+        # 🔴 LIVE event notification — current event, tap to read
+        top = ev[0]
+        stars = "".join(f'<span class="chip">{s}</span>' for s in top["stocks"])
+        tick = (f'<span class="chip t">{top["tick"]}</span>' if top["tick"] and not top["stocks"] else "")
+        st.markdown(
+            f'<div class="livebox"><span class="pulse"></span>'
+            f'<span class="lbt">⚡ LIVE</span>'
+            f'<a class="lbtitle" href="{top["link"]}" target="_blank" '
+            f'title="Open original">{stars}{tick} {_hi(top["title"])}</a></div>',
+            unsafe_allow_html=True)
+        if top["link"].startswith("http"):
+            with st.expander("📖 इस इवेंट को पढ़ें (tap to read)"):
+                bd = load_news_body(top["link"])
+                st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
+                            f'white-space:pre-line;max-height:330px;overflow:auto;">'
+                            f'{bd or "Full text unavailable."}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="margin-top:4px;"><a href="{top["link"]}" '
+                            f'target="_blank">original ↗</a></div>', unsafe_allow_html=True)
+        for it in ev[1:10]:
             hi_title = _hi(it["title"])
             stamps = "".join(f'<span class="chip">{s}</span>' for s in it["stocks"])
             tick = (f'<span class="chip t">{it["tick"]}</span>' if it["tick"] and not it["stocks"] else "")
@@ -664,7 +786,7 @@ with nc2:
                 f'text-decoration:none;">{hi_title}</a></div>'
                 f'<div class="news-src">{it["source"]}</div></div></div>', unsafe_allow_html=True)
             if it["link"].startswith("http"):
-                with st.expander("📖 Read more"):
+                with st.expander("📖 पढ़ें"):
                     bd = load_news_body(it["link"])
                     st.markdown(f'<div style="font-size:12.5px;color:#cdd9ec;line-height:1.6;'
                                 f'white-space:pre-line;max-height:330px;overflow:auto;">'
