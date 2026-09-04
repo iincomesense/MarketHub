@@ -36,6 +36,28 @@ YAHOO_FALLBACK = {
     "NIFTY PHARMA": "^CNXPHARMA",
 }
 
+# TradingView chart symbol for each sector index (built-in chart link, tap to open).
+TV_CHART = {
+    "NIFTY AUTO": "NSE:NIFTY_AUTO",
+    "NIFTY IT": "NSE:CNXIT",
+    "NIFTY PHARMA": "NSE:NIFTY_PHARMA",
+    "NIFTY FMCG": "NSE:NIFTY_FMCG",
+    "NIFTY METAL": "NSE:NIFTY_METAL",
+    "NIFTY ENERGY": "NSE:NIFTY_ENERGY",
+    "NIFTY REALTY": "NSE:NIFTY_REALTY",
+    "NIFTY MEDIA": "NSE:NIFTY_MEDIA",
+    "NIFTY PSU BANK": "NSE:NIFTY_PSU_BANK",
+    "NIFTY INFRA": "NSE:NIFTY_INFRA",
+    "NIFTY FINANCIAL SERVICES": "NSE:NIFTY_FIN",
+    "NIFTY BANK": "NSE:BANKNIFTY",
+    "NIFTY 50": "NSE:NIFTY",
+}
+
+
+def tv_chart_symbol(full_label):
+    """Return the TradingView chart symbol for an NSE sector index (fallback = full)."""
+    return TV_CHART.get(str(full_label).strip(), str(full_label).strip())
+
 
 def _nse_session():
     s = requests.Session()
