@@ -10,19 +10,41 @@ Supported timeframes: 15m · 30m · 75m · 1h · 2h · 4h · 6h · 8h · 1D · 1
 """
 from __future__ import annotations
 
+import time
 import threading
 import pandas as pd
 import yfinance as yf
 
-FUT_STOCKS = [
-    "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
-    "SBIN.NS", "BHARTIARTL.NS", "HINDUNILVR.NS", "ITC.NS", "LT.NS",
-    "BAJFINANCE.NS", "KOTAKBANK.NS", "AXISBANK.NS", "NESTLEIND.NS",
-    "WIPRO.NS", "TITAN.NS", "ULTRACEMCO.NS", "ASIANPAINT.NS",
-]
+# Full user-specified NSE stock universe (RAW_STOCKS).  Underscores are converted
+# to hyphens for Yahoo (e.g. BAJAJ_AUTO -> BAJAJ-AUTO.NS).
+RAW_STOCKS = (
+    "TCS,M&M,HCLTECH,SBIN,INFY,HINDUNILVR,RELIANCE,BHARTIARTL,BEL,ONGC,"
+    "BAJAJ_AUTO,NESTLEIND,POWERGRID,ULTRACEMCO,ITC,ADANIPORTS,LT,COALINDIA,ADANIENT,SUNPHARMA,"
+    "MARUTI,ETERNAL,HDFCBANK,JSWSTEEL,NTPC,ASIANPAINT,DMART,KOTAKBANK,TATASTEEL,TITAN,"
+    "AXISBANK,SHRIRAMFIN,ICICIBANK,BAJFINANCE,MOTHERSON,BRITANNIA,HEROMOTOCO,TVSMOTOR,PERSISTENT,TECHM,"
+    "MCX,OIL,RECLTD,AUROPHARMA,COFORGE,BSE,EICHERMOT,LUPIN,CUMMINSIND,MUTHOOTFIN,"
+    "INDUSTOWER,MAXHEALTH,HINDALCO,JSWENERGY,BHARATFORG,WIPRO,HAVELLS,APLAPOLLO,TMPV,OBEROIRLTY,"
+    "MARICO,SBILIFE,DABUR,TATAPOWER,INDIGO,MFSL,DIXON,SBICARD,SRF,VBL,"
+    "PFC,GODREJCP,ASTRAL,UNITDSPR,GMRAIRPORT,IOC,HDFCAMC,TATACONSUM,HINDPETRO,LODHA,"
+    "GRASIM,TIINDIA,TORNTPHARM,UPL,HDFCLIFE,CANBK,SIEMENS,CGPOWER,APOLLOHOSP,VEDL,"
+    "PNB,POLYCAB,PHOENIXLTD,AUBANK,INDUSINDBK,NAUKRI,ASHOKLEY,DIVISLAB,DRREDDY,CIPLA,"
+    "JINDALSTEL,POLICYBZR,AMBUJACEM,INDHOTEL,BPCL,PIDILITIND,IDFCFIRSTB,ICICIGI,BANKBARODA,TMCV,"
+    "JIOFIN,NMDC,CHOLAFIN,GAIL,TRENT,DLF,BHEL,HAL,IRCTC,ALKEM,"
+    "ABB,ABCAPITAL,BALKRISIND,BOSCHLTD,GODREJPROP,COLPAL,CONCOR,LICI"
+)
+
+
+def _to_sym(n):
+    return n.strip().replace("_", "-") + ".NS"
+
+
+FUT_STOCKS = [_to_sym(x) for x in RAW_STOCKS.split(",") if x.strip()]
 INDEX_INSTR = ["^NSEI"]
 NIFTY_FUT_STOCKS = FUT_STOCKS  # alias
 STOCK_CHOICES = FUT_STOCKS + ["^NSEI"]
+
+# Top ~30 universe names shown by default (fast); the rest via multiselect.
+DEFAULT_UNIVERSE = FUT_STOCKS[:30]
 
 # --------------------------------------------------------------------------- #
 #  Timeframe config — (base yfinance interval, base period, pandas resample    #
@@ -45,17 +67,23 @@ TF_CONFIG = {
     "1M":  dict(interval="1d",  period="2y",  rule="1ME"),
 }
 
-# small process-level cache so a universe scan reuses base bars across TFs
+# small process-level so a universe scan reuses base bars across TFs.
+# Value: (fetched_at_epoch, df).  TTL per interval keeps intraday bars LIVE
+# while letting slow timeframes (daily/weekly/monthly) stay cached longer.
 _BASE_CACHE = {}
 _BASE_LOCK = threading.Lock()
+_BASE_TTL = {"15m": 60, "30m": 60, "60m": 300, "1d": 600}  # seconds
 
 
 def _fetch_base(sym, interval, period):
-    """Fetch + normalise base OHLCV bars, cached per (sym, interval, period)."""
+    """Fetch + normalise base OHLCV bars, cached per (sym, interval, period)
+    with an interval-aware freshness TTL (so intraday bars refresh live)."""
     key = (sym, interval, period)
+    ttl = _BASE_TTL.get(interval, 300)
     with _BASE_LOCK:
-        if key in _BASE_CACHE:
-            return _BASE_CACHE[key].copy()
+        cached = _BASE_CACHE.get(key)
+        if cached and (time.time() - cached[0]) < ttl:
+            return cached[1].copy()
     df = yf.download(sym, interval=interval, progress=False, auto_adjust=False,
                      period=period)
     if df is None or len(df) == 0:
@@ -71,7 +99,7 @@ def _fetch_base(sym, interval, period):
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.dropna(subset=["open", "high", "low", "close"]).sort_values("timestamp")
     with _BASE_LOCK:
-        _BASE_CACHE[key] = df.copy()
+        _BASE_CACHE[key] = (time.time(), df.copy())
     return df
 
 
