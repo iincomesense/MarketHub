@@ -7,6 +7,8 @@ the option-chain deep links in options.py.
 """
 from __future__ import annotations
 
+from urllib.parse import quote
+
 # Our timeframe label -> TradingView chart interval.
 TF_TO_TV = {
     "15m": "15", "30m": "30", "75m": "60", "1h": "60", "2h": "120",
@@ -35,7 +37,7 @@ def tv_symbol(symbol: str) -> str:
 def chart_url(symbol: str, timeframe: str = "1D") -> str:
     """Return a full TradingView chart URL for a symbol / timeframe."""
     iv = TF_TO_TV.get(str(timeframe).lower().replace(" ", ""), TF_TO_TV.get(timeframe, "D"))
-    return f"{_TV_BASE_URL}?symbol={tv_symbol(symbol)}&interval={iv}"
+    return f"{_TV_BASE_URL}?symbol={quote(tv_symbol(symbol))}&interval={iv}"
 
 
 def is_index(symbol: str) -> bool:
