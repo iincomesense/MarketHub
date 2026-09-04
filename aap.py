@@ -288,6 +288,50 @@ def auto_refresh(seconds, key):
 GRP_EN = {"dollar": "💵 Currencies", "rates": "🏛️ Rates & Bonds",
           "commodities": "🥇 Metals & Energy", "indices": "📈 Global Indices"}
 
+# ── TradingView chart symbol resolution (never crashes) ──────────────────────
+# app.py owns a canonical map, so the board/sector chart links keep working even
+# if a stale marketdata.py / sectors.py is deployed WITHOUT tv_chart_symbol().
+_BOARD_TV = {
+    "DXY": "TVC:DXY", "USDINR": "FX_IDC:USDINR", "TLT": "AMEX:TLT",
+    "US 10Y": "TVC:US10Y", "XAUUSD": "OANDA:XAUUSD", "XAGUSD": "OANDA:XAGUSD",
+    "SPOTCRUDE": "TVC:USOIL", "GIFT NIFTY": "NSEIX:NIFTY1!", "NIFTY 50": "NSE:NIFTY",
+    "US30": "TVC:DJI", "US500": "TVC:SPX", "JP225": "TVC:NI225", "SSE": "SSE:000001",
+}
+_SECTOR_TV = {
+    "NIFTY AUTO": "NSE:NIFTY_AUTO", "NIFTY IT": "NSE:CNXIT",
+    "NIFTY PHARMA": "NSE:NIFTY_PHARMA", "NIFTY FMCG": "NSE:NIFTY_FMCG",
+    "NIFTY METAL": "NSE:NIFTY_METAL", "NIFTY ENERGY": "NSE:NIFTY_ENERGY",
+    "NIFTY REALTY": "NSE:NIFTY_REALTY", "NIFTY MEDIA": "NSE:NIFTY_MEDIA",
+    "NIFTY PSU BANK": "NSE:NIFTY_PSU_BANK", "NIFTY INFRA": "NSE:NIFTY_INFRA",
+    "NIFTY FINANCIAL SERVICES": "NSE:NIFTY_FIN", "NIFTY BANK": "NSE:BANKNIFTY",
+    "NIFTY 50": "NSE:NIFTY",
+}
+
+
+def _tv_chart_url(tv_sym, interval="1D"):
+    """Build a TradingView chart URL for a symbol.  Safe (never raises)."""
+    return f'https://www.tradingview.com/chart/?symbol={quote(str(tv_sym))}&interval={interval}'
+
+
+def _board_tv_sym(label, module=None):
+    """Resolve a board tile label -> TradingView symbol."""
+    try:
+        if module is not None and hasattr(module, "tv_chart_symbol"):
+            return module.tv_chart_symbol(label)
+    except Exception:
+        pass
+    return _BOARD_TV.get(str(label).strip(), str(label).strip())
+
+
+def _sector_tv_sym(full, module=None):
+    """Resolve an NSE sector full-name -> TradingView symbol."""
+    try:
+        if module is not None and hasattr(module, "tv_chart_symbol"):
+            return module.tv_chart_symbol(full)
+    except Exception:
+        pass
+    return _SECTOR_TV.get(str(full).strip(), str(full).strip())
+
 
 def render_board():
     import marketdata as md
@@ -301,10 +345,10 @@ def render_board():
     for grp, tiles in md.TILES:
         html.append(f'<tr class="grp"><td colspan="4">{GRP_EN.get(grp, grp)}</td></tr>')
         for t in tiles:
-            q = data[t["label"]]
-            px = f"{q['price']:,.2f}" if q["price"] is not None else "—"
-            _tv_sym = md.tv_chart_symbol(t["label"])
-            _tv_url = f'https://www.tradingview.com/chart/?symbol={quote(_tv_sym)}&interval=1D'
+            q = data.get(t["label"], {})
+            px = f"{q['price']:,.2f}" if q.get("price") is not None else "—"
+            _tv_sym = _board_tv_sym(t["label"], md)
+            _tv_url = _tv_chart_url(_tv_sym)
             html.append(f'<tr><td><a class="sym" href="{_tv_url}" target="_blank" '
                         f'title="Open {t["label"]} on TradingView">📈 {t["label"]}</a></td>'
                         f'<td>{px}</td>'
@@ -328,8 +372,8 @@ def render_sectors():
     for s in sec:
         cls = "up" if s["chg_pct"] >= 0 else "dn"
         sign = "+" if s["chg_pct"] >= 0 else "−"
-        _tv_sym = sc.tv_chart_symbol(s["full"])
-        _tv_url = f'https://www.tradingview.com/chart/?symbol={quote(_tv_sym)}&interval=1D'
+        _tv_sym = _sector_tv_sym(s.get("full", s["label"]), sc)
+        _tv_url = _tv_chart_url(_tv_sym)
         html.append(f'<tr><td><a class="sym" href="{_tv_url}" target="_blank" '
                     f'title="Open {s["label"]} on TradingView">📈 {s["label"]}</a></td>'
                     f'<td>{s["price"]:,.1f}</td>'
@@ -674,9 +718,15 @@ else:
 
 # ── MID: Market board + Sector indices (compact tables) ────────────────────
 st.markdown('<div style="height:14px;"></div>', unsafe_allow_html=True)
-render_board()
+try:
+    render_board()
+except Exception as _e:
+    st.caption(f"Market board temporarily unavailable ({_e}).")
 st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
-render_sectors()
+try:
+    render_sectors()
+except Exception as _e:
+    st.caption(f"Sector indices temporarily unavailable ({_e}).")
 
 st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
 r1, r2 = st.columns([1.0, 1.0], gap="small")
