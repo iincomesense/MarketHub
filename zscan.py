@@ -45,20 +45,39 @@ def _oi_snapshot(symbol):
     return call_oi, put_oi
 
 
+def _fmt_oi(v):
+    """Format an OI count the Indian way (Cr / L / raw)."""
+    if v is None:
+        return "—"
+    v = float(v)
+    if v >= 1e7:
+        return f"{v/1e7:.2f}Cr"
+    if v >= 1e5:
+        return f"{v/1e5:.2f}L"
+    return f"{v:,.0f}"
+
+
 def oi_bias(symbol, is_demand):
-    """Return a display string for the Pur/call OI bias of a zone direction.
+    """Return a rich dict for the Put/Call OI bias of a zone direction.
 
     Demand (support) is bullish-leaning when Put OI > Call OI.
     Supply (resistance) is bearish-leaning when Call OI > Put OI.
-    Returns like 'P>C' (bullish demand), 'C>P' (bearish supply), 'P<C', 'C<P',
-    or '' when the live OI is unavailable (blocked on cloud IPs).
+
+    Returns {label, aligned, put, call} where `label` shows the actual numbers
+    (e.g. 'P 4.5L > C 3.1L'), `aligned` is True when OI agrees with the zone
+    direction.  Returns {} when the live OI is unavailable (blocked on cloud).
     """
     call_oi, put_oi = _oi_snapshot(symbol)
     if call_oi is None or put_oi is None or call_oi == 0:
-        return ""
+        return {}
+    p, c = _fmt_oi(put_oi), _fmt_oi(call_oi)
     if is_demand:
-        return "P>C" if put_oi > call_oi else "P<C"
-    return "C>P" if call_oi > put_oi else "C<P"
+        aligned = put_oi > call_oi
+        return {"label": f"P {p} {'>' if aligned else '<'} C {c}",
+                "aligned": aligned, "put": put_oi, "call": call_oi}
+    aligned = call_oi > put_oi
+    return {"label": f"C {c} {'>' if aligned else '<'} P {p}",
+            "aligned": aligned, "put": put_oi, "call": call_oi}
 
 
 def eod_band(symbol):
