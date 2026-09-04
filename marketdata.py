@@ -53,6 +53,28 @@ FLAT = [t for (_g, tiles) in TILES for t in tiles]
 GROUPS = {k: v for k, v in TILES}
 ROW_BY_GROUP = {"dollar": 1, "rates": 2, "commodities": 3, "indices": 4}
 
+# TradingView chart symbol for each board tile -> built-in chart link (tap to open).
+TV_CHART = {
+    "DXY": "TVC:DXY",
+    "USDINR": "FX_IDC:USDINR",
+    "TLT": "AMEX:TLT",
+    "US 10Y": "TVC:US10Y",
+    "XAUUSD": "OANDA:XAUUSD",
+    "XAGUSD": "OANDA:XAGUSD",
+    "SPOTCRUDE": "TVC:USOIL",
+    "GIFT NIFTY": "NSEIX:NIFTY1!",
+    "NIFTY 50": "NSE:NIFTY",
+    "US30": "TVC:DJI",
+    "US500": "TVC:SPX",
+    "JP225": "TVC:NI225",
+    "SSE": "SSE:000001",
+}
+
+
+def tv_chart_symbol(label):
+    """Return the TradingView chart symbol for a board tile label (fallback = label)."""
+    return TV_CHART.get(str(label).strip(), str(label).strip())
+
 
 def _yf_quote(sym: str):
     """Return (price, prev) or (None, None).  prev uses the prior close so intraday
